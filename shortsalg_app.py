@@ -428,7 +428,7 @@ with tab_top10:
             Målet er å gjøre shortinformasjon lettere tilgjengelig og mer oversiktlig for investorer, analytikere og studenter.</p>
             </div>
 
-            <div class='about-section-title'>⚙️ Hovedfunksjoner</div>
+            <div class='about-section-title'>⚙ Hovedfunksjoner</div>
             <div class='about-card'>
             <ul>
                 <li>Hent og analyser shortdata direkte fra Finanstilsynet</li>
