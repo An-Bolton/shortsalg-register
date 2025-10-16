@@ -449,7 +449,7 @@ with tab_top10:
                 <li><b>SQLite</b> – lokal database for lagring</li>
                 <li><b>Finanstilsynet SSR API</b> – datakilde</li>
             </ul>
-            </div>
+            </div> 
 
             <div class='about-section-title'> Om utvikleren</div>
             <div class='about-card'>
