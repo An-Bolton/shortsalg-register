@@ -416,7 +416,7 @@ with tab_top10:
             unsafe_allow_html=True
         )
 
-        st.markdown("<div class='about-header'> Om denne applikasjonen</div>", unsafe_allow_html=True)
+        st.markdown("<div class='about-header'> Om denne plattformen</div>", unsafe_allow_html=True)
 
         st.markdown(
             """
@@ -455,12 +455,12 @@ with tab_top10:
             <p>Utviklet av <b>Andreas Bolton Seielstad</b> </p>
             <p>Prosjektet er laget for læring, innsikt og åpenhet i finansmarkedet.<br>
             <p><i>Forbedringsidéer?</i> Du kan legge til en GitHub-lenke her ↓</p>
-            <a href='https://github.com/' target='_blank'>🌐 github.com/ditt-prosjekt</a>
+            <a href='https://github.com/An-Bolton' target='_blank'>🌐 https://github.com/An-Bolton/shortsalg-register</a>
             </div>
 
             <div class='about-card'>
             <p><b>Kilde:</b> <a href='https://ssr.finanstilsynet.no/api/v2/' target='_blank'>Finanstilsynet SSR API</a></p>
-            <p><b>Lisens:</b> Fri bruk til analyse, læring og forskning.</p>
+            <p><b>Lisens:</b>Denne er til fri bruk til analyse, læring og forskning.</p>
             </div>
             """,
             unsafe_allow_html=True
