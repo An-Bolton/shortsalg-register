@@ -434,6 +434,7 @@ with tab_top10:
                 <li>Hent og analyser shortdata direkte fra Finanstilsynet</li>
                 <li>Søk, filtrer og sammenlign shortposisjoner per selskap</li>
                 <li>Se topp 10 shortede selskaper med historikk og SPI</li>
+                <li>Se topp 10 shortede selskaper med historikk og SPI</li>
                 <li>Lagre historikk lokalt i SQLite-database</li>
                 <li>Visualisering med Plotly, interaktive grafer og heatmaps</li>
             </ul>
@@ -454,13 +455,11 @@ with tab_top10:
             <div class='about-card'>
             <p>Utviklet av <b>Andreas Bolton Seielstad</b> </p>
             <p>Prosjektet er laget for læring, innsikt og åpenhet i finansmarkedet.<br>
-            <p><i>Forbedringsidéer?</i> Du kan legge til en GitHub-lenke her ↓</p>
-            <a href='https://github.com/An-Bolton' target='_blank'>🌐 https://github.com/An-Bolton/shortsalg-register</a>
+            <a href='https://github.com/An-Bolton' target='_blank'> 🌐 https://github.com/An-Bolton/shortsalg-register</a>
             </div>
 
             <div class='about-card'>
             <p><b>Kilde:</b> <a href='https://ssr.finanstilsynet.no/api/v2/' target='_blank'>Finanstilsynet SSR API</a></p>
-            <p><b>Lisens:</b>Denne er til fri bruk til analyse, læring og forskning.</p>
             </div>
             """,
             unsafe_allow_html=True
