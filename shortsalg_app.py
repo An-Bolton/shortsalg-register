@@ -431,9 +431,7 @@ with tab_top10:
             <div class='about-section-title'>Hovedfunksjoner</div>
             <div class='about-card'>
             <ul>
-                <li>Hent og analyser shortdata direkte fra Finanstilsynet</li>
                 <li>Søk, filtrer og sammenlign shortposisjoner per selskap</li>
-                <li>Se topp 10 shortede selskaper med historikk og SPI</li>
                 <li>Se topp 10 shortede selskaper med historikk og SPI</li>
                 <li>Lagre historikk lokalt i SQLite-database</li>
                 <li>Visualisering med Plotly, interaktive grafer og heatmaps</li>
