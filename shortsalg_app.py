@@ -235,7 +235,7 @@ with tab_db:
 
 # ---------- FANEN FOR TOPP 10 ----------
 with tab_top10:
-    st.header("🏆 Topp 10 shortede selskaper fra SQLite")
+    st.header("Topp 10 shortede selskaper fra SQLite")
 
     try:
         conn = sqlite3.connect("shortsalg.db")
