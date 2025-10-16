@@ -1,0 +1,26 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+
+# PyCharm / IDE
+.idea/
+*.iml
+
+# Streamlit cache
+.streamlit/
+
+# Python
+__pycache__/
+*.pyc
+
+# Database
+*.db
+
+# Logs
+*.log
+
+# OS-filer
+.DS_Store
+Thumbs.db
+
+
