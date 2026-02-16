@@ -162,7 +162,7 @@ with tab_live:
 
     # Status nederst
     st.divider()
-    st.subheader("🕒 Status for shortregisteret")
+    st.subheader("Status for shortregisteret")
     siste_tid, total_rader = hent_siste_oppdatering()
     if siste_tid:
         st.markdown(f"**Sist oppdatert:** {siste_tid}  \n**Totalt antall rader:** {total_rader:,}")
