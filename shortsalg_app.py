@@ -453,7 +453,7 @@ with tab_top10:
             <div class='about-card'>
             <p>Utviklet av <b>Andreas Bolton Seielstad</b> </p>
             <p>Prosjektet er laget for læring, innsikt og åpenhet i finansmarkedet.<br>
-            <a href='https://github.com/An-Bolton' target='_blank'> 🌐 https://github.com/An-Bolton/shortsalg-register</a>
+            <a href='https://github.com/An-Bolton' target='_blank'> https://github.com/An-Bolton/shortsalg-register</a>
             </div>
 
             <div class='about-card'>
