@@ -136,7 +136,7 @@ with tab_live:
                     st.dataframe(vis.head(15), use_container_width=True)
 
             with colB:
-                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### Nye shortposisjoner (>= 0,5%)")
                 if nye.empty:
                     st.info("Ingen nye posisjoner over 0,5% på siste dato.")
                 else:
@@ -270,7 +270,7 @@ with tab_db:
             colA, colB = st.columns(2)
             with colA:
                 endringer = beregn_storste_endringer(df_hist)
-                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+                st.markdown("### Største endringer (siste vs forrige dato)")
                 st.dataframe(
                     endringer[["issuerName", "shortPercent", "endring", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
