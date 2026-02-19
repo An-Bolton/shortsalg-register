@@ -279,7 +279,7 @@ with tab_db:
                 )
             with colB:
                 nye = finn_nye_shortposisjoner(df_hist, terskel=0.5)
-                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### Nye shortposisjoner (>= 0,5%)")
                 st.dataframe(
                     nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
@@ -287,7 +287,7 @@ with tab_db:
                     use_container_width=True,
                 )
 
-        st.markdown("### 🔍 Søk og filtrering")
+        st.markdown("### Søk og filtrering")
         søkbare = sorted(set(df_hist["issuerName"].dropna().tolist() + df_hist["isin"].dropna().tolist()))
         valgt_søk = st.selectbox("Velg eller søk (autocomplete)", ["(Alle)"] + søkbare, index=0, key="db_autocomplete")
 
@@ -347,7 +347,7 @@ with tab_top10:
         colA, colB = st.columns(2)
         with colA:
             endr = beregn_storste_endringer(df_all)
-            st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+            st.markdown("### Største endringer (siste vs forrige dato)")
             st.dataframe(
                 endr[["issuerName", "shortPercent", "endring", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
@@ -356,7 +356,7 @@ with tab_top10:
             )
         with colB:
             nye = finn_nye_shortposisjoner(df_all, terskel=0.5)
-            st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+            st.markdown("### Nye shortposisjoner (>= 0,5%)")
             st.dataframe(
                 nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
