@@ -126,7 +126,7 @@ with tab_live:
             nye = finn_nye_shortposisjoner(df_live, terskel=0.5)
 
             with colA:
-                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+                st.markdown("### Største endringer (siste vs forrige dato)")
                 if endringer.empty:
                     st.info("Ingen endringer å vise (mangler historikk).")
                 else:
@@ -238,7 +238,7 @@ with tab_live:
     siste_tid, total_rader = hent_siste_oppdatering()
     if siste_tid:
         st.markdown(f"**Sist oppdatert (lokalt):** {siste_tid}  \n**Totalt antall rader:** {total_rader:,}")
-        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret i din lokale database, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
+        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret lokalt i databasen, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
     else:
         st.info("Ingen oppdateringsinformasjon funnet ennå.")
 
