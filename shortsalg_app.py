@@ -7,12 +7,40 @@ from ssr_api import hent_fullt_register, lagre_i_database, hent_siste_oppdaterin
 
 
 # -------------------- HJELPEFUNKSJONER --------------------
+
+
+def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardiserer shortPercent til 'prosentpoeng' (f.eks. 2.75 betyr 2,75%).
+    Håndterer vanlige skala-feil:
+      - Hvis verdier ser ut som brøker (0.0275) -> ganger med 100
+      - Hvis verdier ser ut som prosent * 100 (275) -> deler på 100
+    """
+    if df.empty or "shortPercent" not in df.columns:
+        return df
+
+    out = df.copy()
+    out["shortPercent"] = pd.to_numeric(out["shortPercent"], errors="coerce")
+
+    mx = out["shortPercent"].max(skipna=True)
+    if pd.isna(mx):
+        return out
+
+    # Heuristikk: typisk shortandel ligger i området 0–20 (%).
+    if mx <= 1.5:          # ser ut som brøk (0–1)
+        out["shortPercent"] = out["shortPercent"] * 100
+    elif mx > 100:         # ser ut som prosent * 100
+        out["shortPercent"] = out["shortPercent"] / 100
+
+    return out
+
 def _agg_issuer_date(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregerer til én rad per selskap per dato (summerer shortPercent)."""
     if df.empty:
         return df.copy()
 
     out = df.copy()
+    out = _standardiser_shortpercent(out)
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out = out.dropna(subset=["issuerName", "date", "shortPercent"])
     out = (
@@ -126,7 +154,7 @@ with tab_live:
             nye = finn_nye_shortposisjoner(df_live, terskel=0.5)
 
             with colA:
-                st.markdown("### Største endringer (siste vs forrige dato)")
+                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
                 if endringer.empty:
                     st.info("Ingen endringer å vise (mangler historikk).")
                 else:
@@ -136,7 +164,7 @@ with tab_live:
                     st.dataframe(vis.head(15), use_container_width=True)
 
             with colB:
-                st.markdown("### Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
                 if nye.empty:
                     st.info("Ingen nye posisjoner over 0,5% på siste dato.")
                 else:
@@ -238,7 +266,7 @@ with tab_live:
     siste_tid, total_rader = hent_siste_oppdatering()
     if siste_tid:
         st.markdown(f"**Sist oppdatert (lokalt):** {siste_tid}  \n**Totalt antall rader:** {total_rader:,}")
-        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret lokalt i databasen, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
+        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret i din lokale database, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
     else:
         st.info("Ingen oppdateringsinformasjon funnet ennå.")
 
@@ -270,7 +298,7 @@ with tab_db:
             colA, colB = st.columns(2)
             with colA:
                 endringer = beregn_storste_endringer(df_hist)
-                st.markdown("### Største endringer (siste vs forrige dato)")
+                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
                 st.dataframe(
                     endringer[["issuerName", "shortPercent", "endring", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
@@ -279,7 +307,7 @@ with tab_db:
                 )
             with colB:
                 nye = finn_nye_shortposisjoner(df_hist, terskel=0.5)
-                st.markdown("### Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
                 st.dataframe(
                     nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
@@ -287,7 +315,7 @@ with tab_db:
                     use_container_width=True,
                 )
 
-        st.markdown("### Søk og filtrering")
+        st.markdown("### 🔍 Søk og filtrering")
         søkbare = sorted(set(df_hist["issuerName"].dropna().tolist() + df_hist["isin"].dropna().tolist()))
         valgt_søk = st.selectbox("Velg eller søk (autocomplete)", ["(Alle)"] + søkbare, index=0, key="db_autocomplete")
 
@@ -347,7 +375,7 @@ with tab_top10:
         colA, colB = st.columns(2)
         with colA:
             endr = beregn_storste_endringer(df_all)
-            st.markdown("### Største endringer (siste vs forrige dato)")
+            st.markdown("### 📊 Største endringer (siste vs forrige dato)")
             st.dataframe(
                 endr[["issuerName", "shortPercent", "endring", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
@@ -356,7 +384,7 @@ with tab_top10:
             )
         with colB:
             nye = finn_nye_shortposisjoner(df_all, terskel=0.5)
-            st.markdown("### Nye shortposisjoner (>= 0,5%)")
+            st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
             st.dataframe(
                 nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
