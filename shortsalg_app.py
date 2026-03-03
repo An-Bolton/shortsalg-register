@@ -266,7 +266,7 @@ with tab_live:
     siste_tid, total_rader = hent_siste_oppdatering()
     if siste_tid:
         st.markdown(f"**Sist oppdatert (lokalt):** {siste_tid}  \n**Totalt antall rader:** {total_rader:,}")
-        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret i din lokale database, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
+        st.caption("NB: 'Sist oppdatert' er tidspunktet siste data ble lagret lokalt i databasen, ikke nødvendigvis Finanstilsynets publiseringstidspunkt.")
     else:
         st.info("Ingen oppdateringsinformasjon funnet ennå.")
 
