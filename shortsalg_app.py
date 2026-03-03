@@ -278,7 +278,7 @@ with tab_db:
     if "db_data" not in st.session_state:
         st.session_state["db_data"] = pd.DataFrame()
 
-    if st.button("📂 Hent data fra database"):
+    if st.button(" Hent data fra database"):
         try:
             conn = sqlite3.connect("shortsalg.db")
             df_hist = pd.read_sql("SELECT * FROM short_positions", conn)
@@ -298,7 +298,7 @@ with tab_db:
             colA, colB = st.columns(2)
             with colA:
                 endringer = beregn_storste_endringer(df_hist)
-                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+                st.markdown("### Største endringer (siste vs forrige dato)")
                 st.dataframe(
                     endringer[["issuerName", "shortPercent", "endring", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
@@ -307,7 +307,7 @@ with tab_db:
                 )
             with colB:
                 nye = finn_nye_shortposisjoner(df_hist, terskel=0.5)
-                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### Nye shortposisjoner (>= 0,5%)")
                 st.dataframe(
                     nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
