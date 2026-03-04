@@ -375,7 +375,7 @@ with tab_top10:
         colA, colB = st.columns(2)
         with colA:
             endr = beregn_storste_endringer(df_all)
-            st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+            st.markdown("### Største endringer (siste vs forrige dato)")
             st.dataframe(
                 endr[["issuerName", "shortPercent", "endring", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
@@ -384,7 +384,7 @@ with tab_top10:
             )
         with colB:
             nye = finn_nye_shortposisjoner(df_all, terskel=0.5)
-            st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+            st.markdown("### Nye shortposisjoner (>= 0,5%)")
             st.dataframe(
                 nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                     columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
