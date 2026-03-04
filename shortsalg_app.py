@@ -154,7 +154,7 @@ with tab_live:
             nye = finn_nye_shortposisjoner(df_live, terskel=0.5)
 
             with colA:
-                st.markdown("### 📊 Største endringer (siste vs forrige dato)")
+                st.markdown("### Største endringer (siste vs forrige dato)")
                 if endringer.empty:
                     st.info("Ingen endringer å vise (mangler historikk).")
                 else:
@@ -164,7 +164,7 @@ with tab_live:
                     st.dataframe(vis.head(15), use_container_width=True)
 
             with colB:
-                st.markdown("### 🆕 Nye shortposisjoner (>= 0,5%)")
+                st.markdown("### Nye shortposisjoner (>= 0,5%)")
                 if nye.empty:
                     st.info("Ingen nye posisjoner over 0,5% på siste dato.")
                 else:
