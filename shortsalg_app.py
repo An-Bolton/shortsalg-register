@@ -146,7 +146,7 @@ with tab_live:
         st.success(f"Live-data i minne: {len(df_live):,} rader")
 
         # --- Hurtig-innsikt: endringer & nye posisjoner ---
-        with st.expander("⚡ Hurtig-innsikt: Største endringer / nye posisjoner", expanded=True):
+        with st.expander("Hurtig-innsikt: Største endringer / nye posisjoner", expanded=True):
             colA, colB = st.columns(2)
 
             endringer = beregn_storste_endringer(df_live)
