@@ -6,8 +6,7 @@ import plotly.express as px
 from ssr_api import hent_fullt_register, lagre_i_database, hent_siste_oppdatering
 
 
-# -------------------- HJELPEFUNKSJONER --------------------
-
+# -------------------- HJELPEFUNKSJONER I APPEN --------------------
 
 def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -91,23 +90,23 @@ def _fmt_pct(x):
         return x
 
 
-# -------------------- APP --------------------
+# -------------------- APPEN --------------------
 st.set_page_config(page_title="Shortsalg-register", layout="wide")
 st.title("Shortsalg-register fra Finanstilsynet")
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live-data", "Søk i selskaper på Oslo Børs", "Oversikt over de top 10 mest shortede", "Om plattformen"]
+    ["Live-data", "|Søk i selskaper på Oslo Børs", "|Oversikt over de top 10 mest shortede", "|Om plattformen"]
 )
 
-# ---------- 📈 FANEN FOR LIVE-DATA ----------
+# ---------- FANEN FOR LIVE-DATA ----------
 with tab_live:
     st.header("Hent hele shortregisteret")
 
     # Sidebar-status
-    st.sidebar.markdown("### 🌀 Status for live-nedlasting")
+    st.sidebar.markdown("### Status for live-nedlasting")
     sidebar_status = st.sidebar.empty()
 
-    if st.button("🔄 Hent full data fra Finanstilsynet", key="live_download"):
+    if st.button("Hent full data fra Finanstilsynet", key="live_download"):
         st.info("Starter nedlasting fra Finanstilsynet...")
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -142,7 +141,7 @@ with tab_live:
 
     df_live = st.session_state.get("live_df", pd.DataFrame())
     if df_live.empty:
-        st.info("Ingen live-data lastet ennå. Trykk «Hent full data fra Finanstilsynet».")
+        st.info("Ingen live-data lastet ennå. Trykk på knappen «Hent full data fra Finanstilsynet».")
     else:
         st.success(f"Live-data i minne: {len(df_live):,} rader")
 
