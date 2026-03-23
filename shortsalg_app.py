@@ -95,7 +95,7 @@ st.set_page_config(page_title="Shortsalg-register", layout="wide")
 st.title("Shortsalg-register fra Finanstilsynet")
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live-data", "|Søk i selskaper på Oslo Børs", "|Oversikt over de top 10 mest shortede", "|Om plattformen"]
+    ["Live-data", "| Søk i selskaper på Oslo Børs", "| Oversikt over de top 10 mest shortede", "| Om plattformen"]
 )
 
 # ---------- FANEN FOR LIVE-DATA ----------
