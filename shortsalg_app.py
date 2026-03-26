@@ -124,8 +124,8 @@ with tab_live:
             df = hent_fullt_register(_progress_callback=update_progress)
 
         progress_bar.progress(1.0)
-        status_text.text("✅ Ferdig! Data mottatt.")
-        sidebar_status.success("✅ Nedlasting fullført!")
+        status_text.text("Jaujau!! Detta funka, alle tilgjengelig data fra Finanstilsynet ble lastet ned.")
+        sidebar_status.success("Nedlastingen er fullført!")
 
         if df.empty:
             st.warning("Fant ingen data fra Finanstilsynet.")
