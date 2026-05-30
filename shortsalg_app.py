@@ -92,15 +92,146 @@ def _fmt_pct(x):
 
 # -------------------- APPEN --------------------
 st.set_page_config(page_title="Shortsalg-register", layout="wide")
-st.title("Shortsalg-register fra Finanstilsynet")
+
+# Euronext-inspirert toppmeny / header
+st.markdown("""
+<style>
+
+/* Gjør siden bred og fjerner litt Streamlit-luft */
+section.main > div.block-container, .block-container {
+    padding-top: 0.6rem !important;
+    padding-left: 1.2rem !important;
+    padding-right: 1.2rem !important;
+    max-width: 100% !important;
+}
+
+/* Tittelbanner */
+.euronext-title {
+    background-color: #7f95a8;
+    color: white !important;
+    padding: 60px;
+    font-size: 34px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0;
+    margin-top: 20px;
+}
+
+/* Ekstra royal-blue menylinje-look rundt Streamlit-tabs */
+.stTabs, div[data-testid="stTabs"] {
+    width: 100% !important;
+}
+
+/* Selve faneraden */
+.stTabs [data-baseweb="tab-list"],
+div[data-testid="stTabs"] [data-baseweb="tab-list"],
+div[data-testid="stTabs"] > div > div[role="tablist"] {
+    background: linear-gradient(90deg, #4169E1, #1E3FAF) !important;
+    border-bottom: 2px solid #0f2f8f !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    min-height: 58px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    white-space: nowrap !important;
+}
+
+/* Alle faneknapper */
+.stTabs [data-baseweb="tab"],
+div[data-testid="stTabs"] [data-baseweb="tab"],
+button[role="tab"] {
+    background: transparent !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 0 !important;
+    min-height: 58px !important;
+    height: 58px !important;
+    padding: 0 22px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.4px !important;
+}
+
+/* Streamlit legger ofte tekstfargen på p/span inni knappen, derfor må disse også tvinges */
+.stTabs [data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] span,
+div[data-testid="stTabs"] button[role="tab"] p,
+div[data-testid="stTabs"] button[role="tab"] span,
+button[role="tab"] p,
+button[role="tab"] span {
+    color: white !important;
+    font-weight: 700 !important;
+    font-size: 15px !important;
+}
+
+/* Hover */
+.stTabs [data-baseweb="tab"]:hover,
+div[data-testid="stTabs"] button[role="tab"]:hover,
+button[role="tab"]:hover {
+    background-color: #2E8B57 !important;
+    color: black !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover p,
+.stTabs [data-baseweb="tab"]:hover span,
+div[data-testid="stTabs"] button[role="tab"]:hover p,
+div[data-testid="stTabs"] button[role="tab"]:hover span {
+    color: black !important;
+}
+
+/* Aktiv fane */
+.stTabs [data-baseweb="tab"][aria-selected="true"],
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"],
+button[role="tab"][aria-selected="true"] {
+    background-color: #eeece6 !important;
+    color: black !important;
+}
+
+.stTabs [data-baseweb="tab"][aria-selected="true"] p,
+.stTabs [data-baseweb="tab"][aria-selected="true"] span,
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] span,
+button[role="tab"][aria-selected="true"] p,
+button[role="tab"][aria-selected="true"] span {
+    color: black !important;
+}
+
+/* Fjerner Streamlit sin røde/standard underline */
+.stTabs [data-baseweb="tab-highlight"],
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+    background-color: transparent !important;
+    height: 0 !important;
+}
+
+@media (max-width: 700px) {
+    .euronext-title {
+        font-size: 24px;
+        padding: 20px;
+    }
+    .stTabs [data-baseweb="tab"],
+    div[data-testid="stTabs"] [data-baseweb="tab"],
+    button[role="tab"] {
+        padding: 0 14px !important;
+    }
+}
+
+</style>
+
+<div class="euronext-title">
+Shortsalg-register fra Finanstilsynet
+</div>
+
+""", unsafe_allow_html=True)
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live-data", "| Søk i selskaper på Oslo Børs", "| Oversikt over de top 10 mest shortede", "| Om plattformen"]
+    ["Live data", "Søk i selskaper", "Topp 10 mest shortede", "Om plattformen"]
 )
 
 # ---------- FANEN FOR LIVE-DATA ----------
 with tab_live:
     st.header("Hent hele shortregisteret")
+    st.info("Etter at man har hentet short-informasjonen, kan man søke i de ulike selskapene lenger ned på nettsiden her, eller så kan man gå via fanen *søk i selskaper* i menyen :).")
 
     # Sidebar-status
     st.sidebar.markdown("### Status for live-nedlasting")
@@ -124,7 +255,7 @@ with tab_live:
             df = hent_fullt_register(_progress_callback=update_progress)
 
         progress_bar.progress(1.0)
-        status_text.text("Jaujau!! Detta funka, alle tilgjengelig data fra Finanstilsynet ble lastet ned.")
+        status_text.text("Jaujau!! Detta funka,og alle tilgjengelig data fra Finanstilsynet ble lastet ned.")
         sidebar_status.success("Nedlastingen er fullført!")
 
         if df.empty:
@@ -178,7 +309,7 @@ with tab_live:
                     st.dataframe(vis2.head(15), use_container_width=True)
 
         # — Søk + filter —
-        st.subheader("🔍 Søk og filtrering")
+        st.subheader(" Søk og filtrering")
 
         if "live_sokeord" not in st.session_state:
             st.session_state.live_sokeord = ""
@@ -293,7 +424,7 @@ with tab_db:
     if not st.session_state["db_data"].empty:
         df_hist = st.session_state["db_data"]
 
-        with st.expander("⚡ Hurtig-innsikt: Største endringer / nye posisjoner", expanded=False):
+        with st.expander(" Hurtig-innsikt: Største endringer / nye posisjoner", expanded=False):
             colA, colB = st.columns(2)
             with colA:
                 endringer = beregn_storste_endringer(df_hist)
@@ -314,7 +445,7 @@ with tab_db:
                     use_container_width=True,
                 )
 
-        st.markdown("### 🔍 Søk og filtrering")
+        st.markdown("### Søk og filtrering")
         søkbare = sorted(set(df_hist["issuerName"].dropna().tolist() + df_hist["isin"].dropna().tolist()))
         valgt_søk = st.selectbox("Velg eller søk (autocomplete)", ["(Alle)"] + søkbare, index=0, key="db_autocomplete")
 
@@ -364,13 +495,13 @@ with tab_top10:
         st.stop()
 
     if df_all.empty:
-        st.info("Ingen data i databasen. Gå til «Live-data» og hent først.")
+        st.info("Det er ingen data i databasen. Gå til «Live-data» og hent det først.")
         st.stop()
 
     df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
 
     # Hurtig innsikt på hele databasen
-    with st.expander("⚡ Hurtig-innsikt på hele markedet", expanded=False):
+    with st.expander(" Hurtig-innsikt på hele markedet", expanded=False):
         colA, colB = st.columns(2)
         with colA:
             endr = beregn_storste_endringer(df_all)
@@ -414,7 +545,7 @@ with tab_top10:
 
     csv_top10 = df_top10.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="💾 Last ned Topp 10 som CSV",
+        label="Last ned Topp 10 som CSV",
         data=csv_top10,
         file_name=f"topp10_shorts_{antall_dager}d.csv",
         mime="text/csv",
@@ -540,31 +671,31 @@ with tab_about:
     st.markdown(
         """
         <div class='about-card'>
-        Denne applikasjonen visualiserer shortposisjoner i norske børsnoterte selskaper, basert på åpne data fra
+        Denne apppen her visualiserer shortposisjoner i norske børsnoterte selskaper, basert på åpne data fra
         <a href='https://ssr.finanstilsynet.no/' target='_blank'>Finanstilsynets Short Sale Register (SSR)</a>.
         <br><br>
-        Målet er å gjøre shortinformasjon lettere tilgjengelig og mer oversiktlig for investorer, analytikere og studenter.
+        Målet med dette her er å gjøre shortinformasjon lettere tilgjengelig og mer oversiktlig for investorer, analytikere og studenter.
         </div>
 
         <div class='about-section-title'>Hovedfunksjoner</div>
         <div class='about-card'>
         <ul>
-            <li>Søk, filtrer og sammenlign shortposisjoner per selskap</li>
-            <li>Se topp 10 shortede selskaper med historikk og SPI</li>
+            <li>Her kan man søke, filtrere og sammenligne shortposisjoner per selskap</li>
+            <li>Se topp 10 shortede selskaper med historikk og SPI (det står for Short Pressure Index)</li>
             <li>Se største endringer / nye posisjoner på siste oppdaterte dato</li>
-            <li>Lagre historikk lokalt i SQLite-database</li>
-            <li>Visualisering med Plotly, interaktive grafer og heatmaps</li>
+            <li>Man kan lagre historikk lokalt i denne SQLite-databasen på nettsiden her</li>
+            <li>Det er også en rekke muligheter med visualisering med Plotly, interaktive grafer og heatmaps</li>
         </ul>
         </div>
 
         <div class='about-section-title'>Teknisk stack</div>
         <div class='about-card'>
         <ul>
-            <li><b>Python</b> + <b>Streamlit</b> – frontend og logikk</li>
-            <li><b>Pandas</b> – databehandling og analyse</li>
-            <li><b>Plotly</b> – interaktive grafer og visualisering</li>
+            <li><b>Python</b> + <b>Streamlit</b> – frontend og logikk i Python</li>
+            <li><b>Pandas</b> – Det er for databehandling og analyse</li>
+            <li><b>Plotly</b> – Det er interaktive grafer og visualisering som man ser på nettsiden</li>
             <li><b>SQLite</b> – lokal database for lagring</li>
-            <li><b>Finanstilsynet SSR</b> – datakilde</li>
+            <li><b>Finanstilsynet SSR</b> – Det er datakilden jeg har brukt her</li>
         </ul>
         </div>
 
