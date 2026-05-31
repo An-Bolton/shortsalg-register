@@ -266,7 +266,7 @@ with tab_live:
             st.session_state["live_df"] = df.copy()
 
             csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("💾 Last ned som CSV", csv, "shortregister.csv", "text/csv")
+            st.download_button(" Last ned som CSV", csv, "shortregister.csv", "text/csv")
 
     st.divider()
 
