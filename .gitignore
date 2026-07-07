@@ -9,6 +9,9 @@
 __pycache__/
 *.pyc
 
+# Virtual environment
+.venv/
+
 # Database
 *.db
 
@@ -18,5 +21,3 @@ __pycache__/
 # OS-filer
 .DS_Store
 Thumbs.db
-# created by virtualenv automatically
-.venv/bin

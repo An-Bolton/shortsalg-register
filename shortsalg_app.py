@@ -169,7 +169,7 @@ button[role="tab"] span {
 .stTabs [data-baseweb="tab"]:hover,
 div[data-testid="stTabs"] button[role="tab"]:hover,
 button[role="tab"]:hover {
-    background-color: #2E8B57 !important;
+    background-color: #2E8B7 !important;
     color: black !important;
 }
 
@@ -261,7 +261,7 @@ with tab_live:
         if df.empty:
             st.warning("Fant ingen data fra Finanstilsynet.")
         else:
-            st.success(f"Hentet {len(df):,} rader ✅")
+            st.success(f"Hentet {len(df):,} rader ")
             lagre_i_database(df)
             st.session_state["live_df"] = df.copy()
 
@@ -325,7 +325,7 @@ with tab_live:
                 key="live_sokefelt",
             )
         with col2:
-            if st.button("🔄 Nullstill filter", key="live_nullstill"):
+            if st.button(" Nullstill filter", key="live_nullstill"):
                 st.session_state.live_sokeord = ""
                 st.session_state.live_valgte_utstedere = ["(Alle)"]
                 sok = ""
@@ -417,7 +417,7 @@ with tab_db:
                 st.info("Databasen er tom. Hent og lagre data først.")
             else:
                 st.session_state["db_data"] = df_hist
-                st.success(f"Fant {len(df_hist):,} rader ✅")
+                st.success(f"Fant {len(df_hist):,} rader ")
         except Exception as e:
             st.error(f"Feil ved lesing av database: {e}")
 
