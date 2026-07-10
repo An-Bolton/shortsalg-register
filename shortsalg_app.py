@@ -485,6 +485,7 @@ with tab_db:
 # ---------- FANEN FOR TOPP 10 ----------
 with tab_top10:
     st.header("Topp 10 shortede selskaper fra SQLite")
+    st.info("Man må laste ned dataeene fra Finanstilsynet under Live Data, før man kan ta i bruk dette :) ")
 
     try:
         conn = sqlite3.connect("shortsalg.db")
