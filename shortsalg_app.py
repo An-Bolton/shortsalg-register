@@ -10,10 +10,13 @@ from ssr_api import hent_fullt_register, lagre_i_database, hent_siste_oppdaterin
 
 def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Standardiserer shortPercent til 'prosentpoeng' (f.eks. 2.75 betyr 2,75%).
-    Håndterer vanlige skala-feil:
-      - Hvis verdier ser ut som brøker (0.0275) -> ganger med 100
-      - Hvis verdier ser ut som prosent * 100 (275) -> deler på 100
+    Standardiserer shortPercent til prosentpoeng.
+
+    Finanstilsynets data kan komme som hundredeler av et prosentpoeng:
+    58 betyr da 0,58 %, 126 betyr 1,26 %, osv.
+
+    Funksjonen er idempotent: verdier som allerede er standardisert
+    (for eksempel 0,58 eller 1,26) blir ikke endret på nytt.
     """
     if df.empty or "shortPercent" not in df.columns:
         return df
@@ -25,10 +28,7 @@ def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
     if pd.isna(mx):
         return out
 
-    # Heuristikk: typisk shortandel ligger i området 0–20 (%).
-    if mx <= 1.5:          # ser ut som brøk (0–1)
-        out["shortPercent"] = out["shortPercent"] * 100
-    elif mx > 100:         # ser ut som prosent * 100
+    if mx > 20:
         out["shortPercent"] = out["shortPercent"] / 100
 
     return out
@@ -412,7 +412,8 @@ with tab_live:
         if df_plot.empty:
             st.info("Ingen treff for søket eller filteret.")
         else:
-            st.dataframe(df_plot.head(1000), width="stretch")
+            df_visning = _standardiser_shortpercent(df_plot)
+            st.dataframe(df_visning.head(1000), width="stretch")
 
         if not df_plot.empty:
             df_plot = _agg_issuer_date(df_plot)
@@ -434,7 +435,7 @@ with tab_live:
                 legend_title_text="Utsteder",
                 height=600,
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Ingen data tilgjengelig for valgt søk eller filter.")
 
@@ -530,7 +531,8 @@ with tab_db:
             if valgte
             else df_søk.copy()
         )
-        st.dataframe(df_vis.head(1000), width="stretch")
+        df_visning = _standardiser_shortpercent(df_vis)
+        st.dataframe(df_visning.head(1000), width="stretch")
 
         if not df_vis.empty:
             df_plotly = _agg_issuer_date(df_vis)
@@ -544,7 +546,7 @@ with tab_db:
                 labels={"date": "Dato", "shortPercent": "Shortandel (%)", "issuerName": "Selskap"},
             )
             fig_plotly.update_layout(template="plotly_white", hovermode="x unified", height=600)
-            st.plotly_chart(fig_plotly, width="stretch")
+            st.plotly_chart(fig_plotly, use_container_width=True)
 
 
 # ---------- FANEN FOR TOPP 10 ----------
@@ -653,7 +655,7 @@ with tab_top10:
                 color_continuous_scale="Reds",
             )
             fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-            st.plotly_chart(fig_bar, width="stretch")
+            st.plotly_chart(fig_bar, use_container_width=True)
             st.dataframe(df_top10, width="stretch")
 
             topp10_liste = df_top10["issuerName"].tolist()
@@ -696,7 +698,7 @@ with tab_top10:
                     hovermode="x unified",
                     height=600,
                 )
-                st.plotly_chart(fig_utv, width="stretch")
+                st.plotly_chart(fig_utv, use_container_width=True)
 
                 st.markdown("### Endring siste periode")
                 df_diff = pd.DataFrame(
@@ -746,7 +748,7 @@ with tab_top10:
                     xaxis_tickangle=-45,
                     height=500,
                 )
-                st.plotly_chart(fig_spi, width="stretch")
+                st.plotly_chart(fig_spi, use_container_width=True)
 
                 st.markdown("### Short Heatmap – daglige endringer for Topp 10")
                 df_heat = (
@@ -783,7 +785,7 @@ with tab_top10:
                         yaxis_title="Selskap",
                         xaxis_tickangle=-45,
                     )
-                    st.plotly_chart(fig_heat, width="stretch")
+                    st.plotly_chart(fig_heat, use_container_width=True)
 
 
 # ---------- ℹ️ FANEN: OM / ABOUT ----------
