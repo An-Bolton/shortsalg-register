@@ -169,7 +169,7 @@ button[role="tab"] span {
 .stTabs [data-baseweb="tab"]:hover,
 div[data-testid="stTabs"] button[role="tab"]:hover,
 button[role="tab"]:hover {
-    background-color: #2EB57 !important;
+    background-color: #2EB57A !important;
     color: black !important;
 }
 
@@ -276,6 +276,18 @@ with tab_live:
     else:
         st.success(f"Live-data i minne: {len(df_live):,} rader")
 
+        required_columns = {"issuerName", "isin", "date", "shortPercent"}
+        missing_columns = sorted(required_columns.difference(df_live.columns))
+
+        if missing_columns:
+            st.error(
+                "Dataene mangler forventede kolonner: "
+                + ", ".join(missing_columns)
+                + ". Hent data på nytt."
+            )
+            st.session_state["live_df"] = pd.DataFrame()
+            st.rerun()
+
         # --- Hurtig-innsikt: endringer & nye posisjoner ---
         with st.expander("Hurtig-innsikt: Største endringer / nye posisjoner", expanded=True):
             colA, colB = st.columns(2)
@@ -291,7 +303,7 @@ with tab_live:
                     vis = endringer[["issuerName", "shortPercent", "endring", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
                     )
-                    st.dataframe(vis.head(15), use_container_width=True)
+                    st.dataframe(vis.head(15), width="stretch")
 
             with colB:
                 st.markdown("### Nye shortposisjoner (>= 0,5%)")
@@ -306,7 +318,7 @@ with tab_live:
                             "date": "Dato",
                         }
                     )
-                    st.dataframe(vis2.head(15), use_container_width=True)
+                    st.dataframe(vis2.head(15), width="stretch")
 
         # --- Søk + filter ---
         st.subheader("Søk og filtrering")
@@ -394,10 +406,13 @@ with tab_live:
             df_plot = df_filtered.copy()
         else:
             df_plot = df_filtered[
-                df_filtered["issuerName"].isin(valgte)
-            ]
+                df_filtered["issuerName"].fillna("").astype(str).isin(valgte)
+            ].copy()
 
-        st.dataframe(df_plot.head(1000), use_container_width=True)
+        if df_plot.empty:
+            st.info("Ingen treff for søket eller filteret.")
+        else:
+            st.dataframe(df_plot.head(1000), width="stretch")
 
         if not df_plot.empty:
             df_plot = _agg_issuer_date(df_plot)
@@ -419,7 +434,7 @@ with tab_live:
                 legend_title_text="Utsteder",
                 height=600,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("Ingen data tilgjengelig for valgt søk eller filter.")
 
@@ -466,7 +481,7 @@ with tab_db:
                     endringer[["issuerName", "shortPercent", "endring", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
                     ).head(20),
-                    use_container_width=True,
+                    width="stretch",
                 )
             with colB:
                 nye = finn_nye_shortposisjoner(df_hist, terskel=0.5)
@@ -475,7 +490,7 @@ with tab_db:
                     nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
                         columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
                     ).head(20),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
         st.markdown("### Søk og filtrering")
@@ -484,12 +499,25 @@ with tab_db:
 
         df_søk = df_hist.copy()
         if valgt_søk != "(Alle)":
-            df_søk = df_hist[
-                df_hist["issuerName"].str.contains(valgt_søk, case=False, na=False)
-                | df_hist["isin"].str.contains(valgt_søk, case=False, na=False)
-            ]
+            issuer_text = df_hist["issuerName"].fillna("").astype(str)
+            isin_text = df_hist["isin"].fillna("").astype(str)
 
-        utstedere = sorted(df_søk["issuerName"].dropna().unique().tolist())
+            df_søk = df_hist[
+                issuer_text.str.contains(
+                    str(valgt_søk),
+                    case=False,
+                    na=False,
+                    regex=False,
+                )
+                | isin_text.str.contains(
+                    str(valgt_søk),
+                    case=False,
+                    na=False,
+                    regex=False,
+                )
+            ].copy()
+
+        utstedere = sorted(df_søk["issuerName"].dropna().astype(str).unique().tolist())
         valgte = st.multiselect(
             "Velg ett eller flere selskaper (kan kombineres med søk over)",
             utstedere,
@@ -497,8 +525,12 @@ with tab_db:
             key="db_multiselect",
         )
 
-        df_vis = df_søk[df_søk["issuerName"].isin(valgte)] if valgte else df_søk
-        st.dataframe(df_vis.head(1000), use_container_width=True)
+        df_vis = (
+            df_søk[df_søk["issuerName"].fillna("").astype(str).isin(valgte)].copy()
+            if valgte
+            else df_søk.copy()
+        )
+        st.dataframe(df_vis.head(1000), width="stretch")
 
         if not df_vis.empty:
             df_plotly = _agg_issuer_date(df_vis)
@@ -512,7 +544,7 @@ with tab_db:
                 labels={"date": "Dato", "shortPercent": "Shortandel (%)", "issuerName": "Selskap"},
             )
             fig_plotly.update_layout(template="plotly_white", hovermode="x unified", height=600)
-            st.plotly_chart(fig_plotly, use_container_width=True)
+            st.plotly_chart(fig_plotly, width="stretch")
 
 
 # ---------- FANEN FOR TOPP 10 ----------
@@ -558,7 +590,7 @@ with tab_top10:
                             }
                         )
                         .head(20),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
             with colB:
@@ -578,7 +610,7 @@ with tab_top10:
                             }
                         )
                         .head(20),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
         periodevalg = st.selectbox(
@@ -587,7 +619,7 @@ with tab_top10:
             index=0,
         )
         antall_dager = int(periodevalg.split()[0])
-        start_dato = pd.Timestamp.today().normalize() - pd.Timedelta(days=antall_dager)
+        start_dato = pd.Timestamp.today().normalize() - pd.Timedelta(days=int(antall_dager))
         df_recent = df_all[df_all["date"] >= start_dato].copy()
 
         if df_recent.empty:
@@ -621,8 +653,8 @@ with tab_top10:
                 color_continuous_scale="Reds",
             )
             fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-            st.plotly_chart(fig_bar, use_container_width=True)
-            st.dataframe(df_top10, use_container_width=True)
+            st.plotly_chart(fig_bar, width="stretch")
+            st.dataframe(df_top10, width="stretch")
 
             topp10_liste = df_top10["issuerName"].tolist()
             df_utv = (
@@ -664,7 +696,7 @@ with tab_top10:
                     hovermode="x unified",
                     height=600,
                 )
-                st.plotly_chart(fig_utv, use_container_width=True)
+                st.plotly_chart(fig_utv, width="stretch")
 
                 st.markdown("### Endring siste periode")
                 df_diff = pd.DataFrame(
@@ -692,7 +724,7 @@ with tab_top10:
                         "Short Pressure Index (0–100)",
                         ascending=False,
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
                 st.markdown("### Short Pressure Index (SPI)")
@@ -714,7 +746,7 @@ with tab_top10:
                     xaxis_tickangle=-45,
                     height=500,
                 )
-                st.plotly_chart(fig_spi, use_container_width=True)
+                st.plotly_chart(fig_spi, width="stretch")
 
                 st.markdown("### Short Heatmap – daglige endringer for Topp 10")
                 df_heat = (
@@ -751,7 +783,7 @@ with tab_top10:
                         yaxis_title="Selskap",
                         xaxis_tickangle=-45,
                     )
-                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.plotly_chart(fig_heat, width="stretch")
 
 
 # ---------- ℹ️ FANEN: OM / ABOUT ----------
