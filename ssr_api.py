@@ -45,7 +45,7 @@ def _get_first(d, candidates, default=None):
     return default
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
 def _last_ned_data(max_retries=3):
     """
     Henter rådata fra Finanstilsynets instruments-endpoint.
@@ -54,7 +54,11 @@ def _last_ned_data(max_retries=3):
 
     for attempt in range(max_retries):
         try:
-            response = requests.get(API_URL, timeout=120)
+            response = requests.get(
+                API_URL,
+                timeout=(15, 120),
+                headers={"User-Agent": "shortsalg-register/1.0"},
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:

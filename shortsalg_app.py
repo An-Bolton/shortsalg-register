@@ -169,7 +169,7 @@ button[role="tab"] span {
 .stTabs [data-baseweb="tab"]:hover,
 div[data-testid="stTabs"] button[role="tab"]:hover,
 button[role="tab"]:hover {
-    background-color: #2E8B7 !important;
+    background-color: #2EB57 !important;
     color: black !important;
 }
 
@@ -308,45 +308,81 @@ with tab_live:
                     )
                     st.dataframe(vis2.head(15), use_container_width=True)
 
-        # — Søk + filter —
-        st.subheader(" Søk og filtrering")
+        # --- Søk + filter ---
+        st.subheader("Søk og filtrering")
 
-        if "live_sokeord" not in st.session_state:
-            st.session_state.live_sokeord = ""
-        if "live_valgte_utstedere" not in st.session_state:
-            st.session_state.live_valgte_utstedere = ["(Alle)"]
+        def nullstill_live_filter():
+            st.session_state["live_sokefelt"] = ""
+            st.session_state["live_utsteder_filter"] = ["(Alle)"]
+
+        if "live_sokefelt" not in st.session_state:
+            st.session_state["live_sokefelt"] = ""
+
+        if "live_utsteder_filter" not in st.session_state:
+            st.session_state["live_utsteder_filter"] = ["(Alle)"]
 
         col1, col2 = st.columns([4, 1])
+
         with col1:
             sok = st.text_input(
                 "Søk etter selskap eller ISIN",
-                value=st.session_state.live_sokeord,
                 placeholder="F.eks. 'Hoegh', 'MPC', 'AKER BP'...",
                 key="live_sokefelt",
             )
-        with col2:
-            if st.button(" Nullstill filter", key="live_nullstill"):
-                st.session_state.live_sokeord = ""
-                st.session_state.live_valgte_utstedere = ["(Alle)"]
-                sok = ""
 
-        if sok != st.session_state.live_sokeord:
-            st.session_state.live_sokeord = sok
+        with col2:
+            st.button(
+                "Nullstill filter",
+                key="live_nullstill",
+                on_click=nullstill_live_filter,
+            )
 
         df_filtered = df_live.copy()
-        if st.session_state.live_sokeord.strip():
-            s = st.session_state.live_sokeord.strip().lower()
-            df_filtered = df_filtered[
-                df_filtered["issuerName"].str.lower().str.contains(s, na=False)
-                | df_filtered["isin"].str.lower().str.contains(s, na=False)
-            ]
 
-        utstedere = sorted(df_filtered["issuerName"].dropna().unique().tolist())
+        if sok.strip():
+            s = sok.strip()
+
+            issuer_mask = (
+                df_filtered["issuerName"]
+                .fillna("")
+                .astype(str)
+                .str.contains(s, case=False, na=False, regex=False)
+            )
+
+            isin_mask = (
+                df_filtered["isin"]
+                .fillna("")
+                .astype(str)
+                .str.contains(s, case=False, na=False, regex=False)
+            )
+
+            df_filtered = df_filtered[issuer_mask | isin_mask]
+
+        utstedere = sorted(
+            df_filtered["issuerName"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
         alle_valg = ["(Alle)"] + utstedere
 
-        st.session_state.live_valgte_utstedere = [
-            v for v in st.session_state.live_valgte_utstedere if (v == "(Alle)" or v in utstedere)
-        ] or ["(Alle)"]
+        tidligere_valg = st.session_state.get(
+            "live_utsteder_filter",
+            ["(Alle)"],
+        )
+
+        gyldige_valg = [
+            verdi
+            for verdi in tidligere_valg
+            if verdi in alle_valg
+        ]
+
+        if not gyldige_valg:
+            gyldige_valg = ["(Alle)"]
+
+        st.session_state["live_utsteder_filter"] = gyldige_valg
 
         valgte = st.multiselect(
             "Velg ett eller flere selskaper",
@@ -354,15 +390,12 @@ with tab_live:
             key="live_utsteder_filter",
         )
 
-        if valgte:
-            st.session_state.live_valgte_utstedere = valgte
-
-        valgte = st.session_state.live_valgte_utstedere
-
         if "(Alle)" in valgte or not valgte:
             df_plot = df_filtered.copy()
         else:
-            df_plot = df_filtered[df_filtered["issuerName"].isin(valgte)]
+            df_plot = df_filtered[
+                df_filtered["issuerName"].isin(valgte)
+            ]
 
         st.dataframe(df_plot.head(1000), use_container_width=True)
 
@@ -485,154 +518,240 @@ with tab_db:
 # ---------- FANEN FOR TOPP 10 ----------
 with tab_top10:
     st.header("Topp 10 shortede selskaper fra SQLite")
-    st.info("Man må laste ned dataene fra Finanstilsynet under Live Data oppe i menyen, før man kan ta i bruk dette :) ")
+    st.info(
+        "Man må laste ned dataene fra Finanstilsynet under Live Data oppe i menyen, "
+        "før man kan ta i bruk dette."
+    )
 
     try:
         conn = sqlite3.connect("shortsalg.db")
         df_all = pd.read_sql("SELECT * FROM short_positions", conn)
         conn.close()
     except Exception as e:
-        st.error(f"Kunne ikke lese fra database: {e}")
-        st.stop()
+        df_all = pd.DataFrame()
+        st.warning(f"Databasen er ikke klar ennå: {e}")
 
     if df_all.empty:
         st.info("Det er ingen data i databasen. Gå til «Live-data» og hent det først.")
-        st.stop()
+    else:
+        df_all = _standardiser_shortpercent(df_all)
+        df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
+        df_all = df_all.dropna(subset=["issuerName", "date", "shortPercent"])
 
-    df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
+        with st.expander("Hurtig-innsikt på hele markedet", expanded=False):
+            colA, colB = st.columns(2)
 
-    # Hurtig innsikt på hele databasen
-    with st.expander(" Hurtig-innsikt på hele markedet", expanded=False):
-        colA, colB = st.columns(2)
-        with colA:
-            endr = beregn_storste_endringer(df_all)
-            st.markdown("### Største endringer (siste vs forrige dato)")
-            st.dataframe(
-                endr[["issuerName", "shortPercent", "endring", "date"]].rename(
-                    columns={"issuerName": "Selskap", "shortPercent": "Short %", "endring": "Endring", "date": "Dato"}
-                ).head(20),
-                use_container_width=True,
+            with colA:
+                endr = beregn_storste_endringer(df_all)
+                st.markdown("### Største endringer (siste vs forrige dato)")
+                if endr.empty:
+                    st.info("Ingen endringer å vise.")
+                else:
+                    st.dataframe(
+                        endr[["issuerName", "shortPercent", "endring", "date"]]
+                        .rename(
+                            columns={
+                                "issuerName": "Selskap",
+                                "shortPercent": "Short %",
+                                "endring": "Endring",
+                                "date": "Dato",
+                            }
+                        )
+                        .head(20),
+                        use_container_width=True,
+                    )
+
+            with colB:
+                nye = finn_nye_shortposisjoner(df_all, terskel=0.5)
+                st.markdown("### Nye shortposisjoner (>= 0,5%)")
+                if nye.empty:
+                    st.info("Ingen nye posisjoner å vise.")
+                else:
+                    st.dataframe(
+                        nye[["issuerName", "shortPercent", "forrige_short", "date"]]
+                        .rename(
+                            columns={
+                                "issuerName": "Selskap",
+                                "shortPercent": "Short %",
+                                "forrige_short": "Forrige %",
+                                "date": "Dato",
+                            }
+                        )
+                        .head(20),
+                        use_container_width=True,
+                    )
+
+        periodevalg = st.selectbox(
+            "Velg tidsperiode",
+            ["30 dager", "90 dager", "180 dager", "365 dager"],
+            index=0,
+        )
+        antall_dager = int(periodevalg.split()[0])
+        start_dato = pd.Timestamp.today().normalize() - pd.Timedelta(days=antall_dager)
+        df_recent = df_all[df_all["date"] >= start_dato].copy()
+
+        if df_recent.empty:
+            st.warning("Ingen data for valgt periode.")
+        else:
+            df_top10 = (
+                df_recent.groupby("issuerName", as_index=False)["shortPercent"]
+                .mean()
+                .sort_values("shortPercent", ascending=False)
+                .head(10)
             )
-        with colB:
-            nye = finn_nye_shortposisjoner(df_all, terskel=0.5)
-            st.markdown("### Nye shortposisjoner (>= 0,5%)")
-            st.dataframe(
-                nye[["issuerName", "shortPercent", "forrige_short", "date"]].rename(
-                    columns={"issuerName": "Selskap", "shortPercent": "Short %", "forrige_short": "Forrige %", "date": "Dato"}
-                ).head(20),
-                use_container_width=True,
+
+            st.markdown(f"### Topp 10 shortede selskaper (siste {antall_dager} dager)")
+
+            csv_top10 = df_top10.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Last ned Topp 10 som CSV",
+                data=csv_top10,
+                file_name=f"topp10_shorts_{antall_dager}d.csv",
+                mime="text/csv",
             )
 
-    # Velg periode
-    periodevalg = st.selectbox("Velg tidsperiode", ["30 dager", "90 dager", "180 dager", "365 dager"], index=0)
-    antall_dager = int(periodevalg.split()[0])
-    start_dato = pd.Timestamp.today() - pd.Timedelta(days=antall_dager)
-    df_recent = df_all[df_all["date"] >= start_dato]
+            fig_bar = px.bar(
+                df_top10,
+                x="issuerName",
+                y="shortPercent",
+                title=f"Topp 10 shortede selskaper (siste {antall_dager} dager)",
+                labels={"issuerName": "Selskap", "shortPercent": "Shortandel (%)"},
+                text_auto=".2f",
+                color="shortPercent",
+                color_continuous_scale="Reds",
+            )
+            fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
+            st.plotly_chart(fig_bar, use_container_width=True)
+            st.dataframe(df_top10, use_container_width=True)
 
-    if df_recent.empty:
-        st.warning("Ingen data for valgt periode.")
-        st.stop()
+            topp10_liste = df_top10["issuerName"].tolist()
+            df_utv = (
+                df_recent[df_recent["issuerName"].isin(topp10_liste)]
+                .groupby(["issuerName", "date"], as_index=False)["shortPercent"]
+                .mean()
+            )
 
-    # --- Topp 10 shortede selskaper ---
-    df_top10 = (
-        df_recent.groupby("issuerName")["shortPercent"]
-        .mean()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
+            if df_utv.empty:
+                st.info("Ingen utviklingsdata tilgjengelig for Topp 10.")
+            else:
+                siste_dato = df_utv["date"].max()
+                forste_dato = df_utv["date"].min()
 
-    st.markdown(f"### Topp 10 shortede selskaper (siste {antall_dager} dager)")
+                siste = df_utv[df_utv["date"] == siste_dato]
+                forste = df_utv[df_utv["date"] == forste_dato]
 
-    csv_top10 = df_top10.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="Last ned Topp 10 som CSV",
-        data=csv_top10,
-        file_name=f"topp10_shorts_{antall_dager}d.csv",
-        mime="text/csv",
-    )
+                diff = (
+                    siste.set_index("issuerName")["shortPercent"]
+                    .subtract(forste.set_index("issuerName")["shortPercent"], fill_value=0)
+                    .sort_values(ascending=False)
+                )
 
-    fig_bar = px.bar(
-        df_top10,
-        x="issuerName",
-        y="shortPercent",
-        title=f"Topp 10 shortede selskaper (siste {antall_dager} dager)",
-        labels={"issuerName": "Selskap", "shortPercent": "Shortandel (%)"},
-        text_auto=".2f",
-        color="shortPercent",
-        color_continuous_scale="Reds",
-    )
-    fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-    st.plotly_chart(fig_bar, use_container_width=True)
-    st.dataframe(df_top10, use_container_width=True)
+                st.markdown("### Utvikling over tid for Topp 10")
+                fig_utv = px.line(
+                    df_utv,
+                    x="date",
+                    y="shortPercent",
+                    color="issuerName",
+                    labels={
+                        "date": "Dato",
+                        "shortPercent": "Shortandel (%)",
+                        "issuerName": "Selskap",
+                    },
+                    title=f"Utvikling i shortandel for Topp 10 (siste {antall_dager} dager)",
+                )
+                fig_utv.update_layout(
+                    template="plotly_white",
+                    hovermode="x unified",
+                    height=600,
+                )
+                st.plotly_chart(fig_utv, use_container_width=True)
 
-    topp10_liste = df_top10["issuerName"].tolist()
-    df_utv = (
-        df_recent[df_recent["issuerName"].isin(topp10_liste)]
-        .groupby(["issuerName", "date"])["shortPercent"]
-        .mean()
-        .reset_index()
-    )
+                st.markdown("### Endring siste periode")
+                df_diff = pd.DataFrame(
+                    {
+                        "issuerName": diff.index,
+                        "Endring siste periode (%)": diff.values,
+                    }
+                )
 
-    siste = df_utv[df_utv["date"] == df_utv["date"].max()]
-    første = df_utv[df_utv["date"] == df_utv["date"].min()]
-    diff = (siste.set_index("issuerName")["shortPercent"] - første.set_index("issuerName")["shortPercent"]).sort_values(
-        ascending=False
-    )
+                df_spi = df_top10.merge(df_diff, on="issuerName", how="left")
+                df_spi["Endring siste periode (%)"] = (
+                    df_spi["Endring siste periode (%)"].fillna(0)
+                )
+                df_spi["Short Pressure Index (0–100)"] = (
+                    (df_spi["shortPercent"] * 0.7)
+                    + (df_spi["Endring siste periode (%)"] * 3.0)
+                ).clip(0, 100)
 
-    st.markdown("### Utvikling over tid for Topp 10")
-    fig_utv = px.line(
-        df_utv,
-        x="date",
-        y="shortPercent",
-        color="issuerName",
-        labels={"date": "Dato", "shortPercent": "Shortandel (%)", "issuerName": "Selskap"},
-        title=f"Utvikling i shortandel for Topp 10 (siste {antall_dager} dager)",
-    )
-    fig_utv.update_layout(template="plotly_white", hovermode="x unified", height=600)
-    st.plotly_chart(fig_utv, use_container_width=True)
+                df_spi["Retning"] = df_spi["Endring siste periode (%)"].apply(
+                    lambda x: "🔺 Økende" if x > 0 else "🔻 Fallende"
+                )
 
-    st.markdown("### 🔺 Endring siste periode (mest økende / fallende)")
-    df_diff = pd.DataFrame({"issuerName": diff.index, "Endring siste periode (%)": diff.values})
+                st.dataframe(
+                    df_spi.sort_values(
+                        "Short Pressure Index (0–100)",
+                        ascending=False,
+                    ),
+                    use_container_width=True,
+                )
 
-    df_spi = df_top10.merge(df_diff, on="issuerName", how="left")
-    df_spi["Short Pressure Index (0–100)"] = ((df_spi["shortPercent"] * 0.7) + (df_spi["Endring siste periode (%)"] * 3.0)).clip(
-        0, 100
-    )
+                st.markdown("### Short Pressure Index (SPI)")
+                fig_spi = px.bar(
+                    df_spi,
+                    x="issuerName",
+                    y="Short Pressure Index (0–100)",
+                    color="Short Pressure Index (0–100)",
+                    color_continuous_scale="RdYlGn_r",
+                    text_auto=".1f",
+                    labels={
+                        "issuerName": "Selskap",
+                        "Short Pressure Index (0–100)": "Shortpress",
+                    },
+                    title="Short Pressure Index – kombinasjon av shortandel og endring",
+                )
+                fig_spi.update_layout(
+                    template="plotly_white",
+                    xaxis_tickangle=-45,
+                    height=500,
+                )
+                st.plotly_chart(fig_spi, use_container_width=True)
 
-    df_spi["Retning"] = df_spi["Endring siste periode (%)"].apply(lambda x: "🔺 Økende" if x > 0 else "🔻 Fallende")
-    st.dataframe(df_spi.sort_values("Short Pressure Index (0–100)", ascending=False), use_container_width=True)
+                st.markdown("### Short Heatmap – daglige endringer for Topp 10")
+                df_heat = (
+                    df_utv.pivot_table(
+                        index="issuerName",
+                        columns="date",
+                        values="shortPercent",
+                    )
+                    .diff(axis=1)
+                    .fillna(0)
+                )
 
-    st.markdown("### Short Pressure Index (SPI)")
-    fig_spi = px.bar(
-        df_spi,
-        x="issuerName",
-        y="Short Pressure Index (0–100)",
-        color="Short Pressure Index (0–100)",
-        color_continuous_scale="RdYlGn_r",
-        text_auto=".1f",
-        labels={"issuerName": "Selskap", "Short Pressure Index (0–100)": "Shortpress"},
-        title="Short Pressure Index – kombinasjon av shortandel og endring",
-    )
-    fig_spi.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-    st.plotly_chart(fig_spi, use_container_width=True)
-
-    st.markdown("### Short Heatmap – daglige endringer for Topp 10")
-    df_heat = (
-        df_utv.pivot_table(index="issuerName", columns="date", values="shortPercent")
-        .diff(axis=1)
-        .fillna(0)
-    )
-
-    fig_heat = px.imshow(
-        df_heat,
-        color_continuous_scale=["green", "black", "red"],
-        aspect="auto",
-        title="Daglige endringer i shortandel (grønn = dekker inn, rød = økende short)",
-        labels={"x": "Dato", "y": "Selskap", "color": "Endring (%)"},
-    )
-    fig_heat.update_layout(template="plotly_white", height=600, xaxis_title="Dato", yaxis_title="Selskap", xaxis_tickangle=-45)
-    st.plotly_chart(fig_heat, use_container_width=True)
+                if df_heat.empty:
+                    st.info("Ikke nok historikk til å lage heatmap.")
+                else:
+                    fig_heat = px.imshow(
+                        df_heat,
+                        color_continuous_scale=["green", "black", "red"],
+                        aspect="auto",
+                        title=(
+                            "Daglige endringer i shortandel "
+                            "(grønn = dekker inn, rød = økende short)"
+                        ),
+                        labels={
+                            "x": "Dato",
+                            "y": "Selskap",
+                            "color": "Endring (%)",
+                        },
+                    )
+                    fig_heat.update_layout(
+                        template="plotly_white",
+                        height=600,
+                        xaxis_title="Dato",
+                        yaxis_title="Selskap",
+                        xaxis_tickangle=-45,
+                    )
+                    st.plotly_chart(fig_heat, use_container_width=True)
 
 
 # ---------- ℹ️ FANEN: OM / ABOUT ----------
