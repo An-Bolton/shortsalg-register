@@ -1,13 +1,17 @@
-# ssr_api_med_shortere_final.py
-import streamlit as st
-import requests
-import pandas as pd
-import sqlite3
 import datetime
+import os
+import sqlite3
+import threading
 import time
+from pathlib import Path
 
+import pandas as pd
+import requests
+import streamlit as st
 
 API_URL = "https://ssr.finanstilsynet.no/api/v2/instruments/export-json"
+DB_PATH = os.environ.get("SHORTSALG_DB_PATH", "shortsalg.db")
+_DB_LOCK = threading.RLock()
 
 
 def _to_iso_date(value):
@@ -23,63 +27,33 @@ def _to_iso_date(value):
 
 
 def _standardiser_shortpercent(value):
+    """Normaliserer API-verdien til prosentpoeng, f.eks. 58 -> 0,58."""
     try:
         x = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
-    if x <= 1.5:
-        return x * 100
-    if x > 100:
+    if x > 20:
         return x / 100
     return x
 
 
-def _get_first(d, candidates, default=None):
-    if not isinstance(d, dict):
+def _get_first(data, candidates, default=None):
+    if not isinstance(data, dict):
         return default
-    lower_map = {str(k).lower(): v for k, v in d.items()}
+    lower_map = {str(key).lower(): value for key, value in data.items()}
     for candidate in candidates:
         if candidate.lower() in lower_map:
             return lower_map[candidate.lower()]
     return default
 
 
-@st.cache_data(ttl=3600, max_entries=3, show_spinner=False)
-def _last_ned_data(max_retries=3):
-    """
-    Henter rådata fra Finanstilsynets instruments-endpoint.
-    """
-    print(f"Henter data fra {API_URL} ...")
-
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(
-                API_URL,
-                timeout=(15, 120),
-                headers={"User-Agent": "shortsalg-register/1.0"},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Forsøk {attempt + 1}/{max_retries} feilet: {e}")
-            time.sleep(3)
-
-    return []
-
-
 def _normaliser_payload(data):
-    """
-    Parser både aggregert og detaljert info fra instruments/export-json.
-
-    Viktig:
-    API-dokumentasjon ser ut til å indikere at event-objektene kan inneholde
-    positionHolder. Derfor prøver vi både toppnivå og event-nivå.
-    """
     rows = []
+    columns = ["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"]
 
     if not isinstance(data, list):
-        return pd.DataFrame(columns=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"])
+        return pd.DataFrame(columns=columns)
 
     for instrument in data:
         if not isinstance(instrument, dict):
@@ -120,46 +94,59 @@ def _normaliser_payload(data):
             if row["issuerName"] and row["date"] and row["shortPercent"] is not None:
                 rows.append(row)
 
-    return pd.DataFrame(rows)
-
-
-def hent_fullt_register(max_retries=3, _progress_callback=None):
-    """
-    Henter shortregisteret fra Finanstilsynet.
-    """
-    if _progress_callback:
-        _progress_callback(0.05, 0, 1)
-
-    data = _last_ned_data(max_retries=max_retries)
-
-    if not data:
-        st.error("Klarte ikke hente data fra Finanstilsynet.")
-        return pd.DataFrame()
-
-    if _progress_callback:
-        _progress_callback(0.85, 1, 1)
-
-    df = _normaliser_payload(data)
-
-    if df.empty:
-        st.warning("Data ble hentet, men parseren fant ingen gyldige rader.")
-        return df
-
-    if _progress_callback:
-        _progress_callback(1.0, 1, 1)
-
-    print(f"Totalt {len(df):,} rader hentet.")
-    print("Kolonner:", df.columns.tolist())
+    df = pd.DataFrame(rows, columns=columns)
+    if not df.empty:
+        df["shortPercent"] = pd.to_numeric(df["shortPercent"], errors="coerce")
+        df["shares"] = pd.to_numeric(df["shares"], errors="coerce")
+        df = df.dropna(subset=["issuerName", "date", "shortPercent"])
+        df = df.drop_duplicates().reset_index(drop=True)
     return df
 
 
-def _ensure_short_positions_schema(conn):
+@st.cache_resource(ttl=3600, max_entries=1, show_spinner=False)
+def hent_fullt_register(max_retries=3):
     """
-    Sørger for at short_positions-tabellen har riktig struktur.
-    Legger til manglende kolonner hvis databasen er fra en eldre versjon.
+    Henter og normaliserer hele registeret én gang per time, delt mellom alle brukere.
+    DataFrame-en skal behandles som skrivebeskyttet i appen.
     """
-    cur = conn.cursor()
-    cur.execute(
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                API_URL,
+                timeout=(15, 120),
+                headers={"User-Agent": "shortsalg-register/2.0"},
+            )
+            response.raise_for_status()
+            df = _normaliser_payload(response.json())
+            if df.empty:
+                raise ValueError("API-et svarte, men parseren fant ingen gyldige rader.")
+            return df
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                time.sleep(2 + attempt)
+
+    print(f"Klarte ikke hente data fra Finanstilsynet: {last_error}")
+    return pd.DataFrame(columns=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"])
+
+
+def tving_ny_nedlasting():
+    """Tømmer den delte API-cachen. Neste kall laster data på nytt."""
+    hent_fullt_register.clear()
+
+
+def _connect(db_path=DB_PATH):
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
+def _ensure_schema(conn):
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS short_positions (
             isin TEXT,
@@ -171,138 +158,113 @@ def _ensure_short_positions_schema(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS updates_log (
+            timestamp TEXT,
+            new_rows INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_issuer_date ON short_positions (issuerName, date)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_short_isin ON short_positions (isin)"
+    )
     conn.commit()
 
-    existing_cols = [row[1] for row in cur.execute("PRAGMA table_info(short_positions)").fetchall()]
-    wanted = {
-        "isin": "TEXT",
-        "issuerName": "TEXT",
-        "positionHolder": "TEXT",
-        "date": "TEXT",
-        "shortPercent": "REAL",
-        "shares": "REAL",
-    }
 
-    for col, col_type in wanted.items():
-        if col not in existing_cols:
-            cur.execute(f"ALTER TABLE short_positions ADD COLUMN {col} {col_type}")
-    conn.commit()
-
-
-def lagre_i_database(df, db_path="shortsalg.db"):
-    """Lagrer DataFrame i SQLite-database."""
-    if df.empty:
-        print("Ingen data å lagre.")
-        return
-
-    df = df.copy()
-    if "positionHolder" not in df.columns:
-        df["positionHolder"] = None
-
-    conn = sqlite3.connect(db_path)
-    _ensure_short_positions_schema(conn)
-
+@st.cache_resource(ttl=300, max_entries=1, show_spinner=False)
+def hent_database_data(db_path=DB_PATH):
+    """Leser SQLite-data én gang per fem minutter, delt mellom brukerne."""
     try:
-        eksisterende = pd.read_sql(
-            "SELECT isin, issuerName, positionHolder, date, shortPercent, shares FROM short_positions",
-            conn,
-        )
-    except Exception:
-        eksisterende = pd.DataFrame(columns=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"])
-
-    if not eksisterende.empty:
-        df_cmp = df.copy()
-        ex_cmp = eksisterende.copy()
-
-        for col in ["isin", "issuerName", "positionHolder", "date"]:
-            df_cmp[col] = df_cmp[col].fillna("")
-            ex_cmp[col] = ex_cmp[col].fillna("")
-
-        merged = df_cmp.merge(
-            ex_cmp,
-            on=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"],
-            how="left",
-            indicator=True,
-        )
-        df = df.loc[merged["_merge"] == "left_only"].copy()
-
-    if not df.empty:
-        df.to_sql("short_positions", conn, if_exists="append", index=False)
-        print(f"Lagret {len(df)} nye rader i databasen {db_path}.")
-    else:
-        print("Ingen nye rader å lagre.")
-
-    conn.close()
+        with _DB_LOCK:
+            conn = _connect(db_path)
+            _ensure_schema(conn)
+            df = pd.read_sql_query(
+                "SELECT isin, issuerName, positionHolder, date, shortPercent, shares FROM short_positions",
+                conn,
+            )
+            conn.close()
+        return df
+    except Exception as exc:
+        print(f"Feil ved lesing av database: {exc}")
+        return pd.DataFrame(columns=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"])
 
 
-def oppdater_database_automatisk(db_path="shortsalg.db"):
-    """Oppdaterer databasen og logger tidspunkt + antall nye rader."""
-    print("🔄 Starter automatisk oppdatering av shortregisteret...")
-    df_ny = hent_fullt_register()
-
-    if df_ny.empty:
-        print("Ingen nye data tilgjengelig.")
-        return
-
-    conn = sqlite3.connect(db_path)
-    _ensure_short_positions_schema(conn)
-
-    try:
-        df_gammel = pd.read_sql("SELECT * FROM short_positions", conn)
-    except Exception:
-        df_gammel = pd.DataFrame()
-
-    if not df_gammel.empty:
-        nøkkelkolonner = [c for c in ["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"] if c in df_ny.columns and c in df_gammel.columns]
-        gammel = df_gammel[nøkkelkolonner].drop_duplicates().copy()
-        ny = df_ny.copy()
-
-        for col in ["isin", "issuerName", "positionHolder", "date"]:
-            if col in ny.columns:
-                ny[col] = ny[col].fillna("")
-            if col in gammel.columns:
-                gammel[col] = gammel[col].fillna("")
-
-        merged = ny.merge(gammel, on=nøkkelkolonner, how="left", indicator=True)
-        df_ny = df_ny.loc[merged["_merge"] == "left_only"].copy()
-
-    antall_nye = len(df_ny)
-    if antall_nye > 0:
-        df_ny.to_sql("short_positions", conn, if_exists="append", index=False)
-        print(f"✅ Lagret {antall_nye} nye rader ({datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
-    else:
-        print("🟡 Ingen nye rader å lagre.")
-
-    log_df = pd.DataFrame([{
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "new_rows": antall_nye
-    }])
-    log_df.to_sql("updates_log", conn, if_exists="append", index=False)
-    conn.close()
-    print(f"Logget oppdatering: {antall_nye} nye rader.")
+def _clear_database_cache():
+    hent_database_data.clear()
 
 
-def hent_siste_oppdatering(db_path="shortsalg.db"):
-    """Henter siste oppdateringstidspunkt og totalt antall rader i databasen."""
-    try:
-        conn = sqlite3.connect(db_path)
+def lagre_i_database(df, db_path=DB_PATH):
+    """Lagrer bare nye rader. Skriving serialiseres for å unngå SQLite-låsing."""
+    if df is None or df.empty:
+        return 0
 
-        siste_tid = None
+    columns = ["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"]
+    clean = df.copy()
+    for column in columns:
+        if column not in clean.columns:
+            clean[column] = None
+    clean = clean[columns].drop_duplicates()
+
+    with _DB_LOCK:
+        conn = _connect(db_path)
+        _ensure_schema(conn)
         try:
-            df_log = pd.read_sql("SELECT * FROM updates_log ORDER BY timestamp DESC LIMIT 1", conn)
-            if not df_log.empty:
-                siste_tid = df_log.iloc[0]["timestamp"]
-        except Exception:
-            pass
+            existing = pd.read_sql_query(
+                "SELECT isin, issuerName, positionHolder, date, shortPercent, shares FROM short_positions",
+                conn,
+            )
 
-        try:
-            total = pd.read_sql("SELECT COUNT(*) as antall FROM short_positions", conn).iloc[0]["antall"]
-        except Exception:
-            total = 0
+            compare_cols = columns
+            left = clean.copy()
+            right = existing.copy()
+            for column in ["isin", "issuerName", "positionHolder", "date"]:
+                left[column] = left[column].fillna("").astype(str)
+                right[column] = right[column].fillna("").astype(str)
+            for column in ["shortPercent", "shares"]:
+                left[column] = pd.to_numeric(left[column], errors="coerce")
+                right[column] = pd.to_numeric(right[column], errors="coerce")
 
-        conn.close()
-        return siste_tid, total
+            if not right.empty:
+                marker = right.drop_duplicates(compare_cols)
+                merged = left.merge(marker, on=compare_cols, how="left", indicator=True)
+                new_mask = merged["_merge"].eq("left_only").to_numpy()
+                clean = clean.loc[new_mask].copy()
 
-    except Exception as e:
-        print(f"Feil ved henting av oppdateringsinfo: {e}")
+            if clean.empty:
+                new_rows = 0
+            else:
+                clean.to_sql("short_positions", conn, if_exists="append", index=False, method="multi", chunksize=1000)
+                new_rows = len(clean)
+
+            pd.DataFrame(
+                [{
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "new_rows": int(new_rows),
+                }]
+            ).to_sql("updates_log", conn, if_exists="append", index=False)
+            conn.commit()
+        finally:
+            conn.close()
+
+    _clear_database_cache()
+    return int(new_rows)
+
+
+def hent_siste_oppdatering(db_path=DB_PATH):
+    try:
+        with _DB_LOCK:
+            conn = _connect(db_path)
+            _ensure_schema(conn)
+            row = conn.execute(
+                "SELECT timestamp FROM updates_log ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            total = conn.execute("SELECT COUNT(*) FROM short_positions").fetchone()[0]
+            conn.close()
+        return (row[0] if row else None), int(total)
+    except Exception as exc:
+        print(f"Feil ved henting av oppdateringsinfo: {exc}")
         return None, 0
