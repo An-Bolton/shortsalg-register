@@ -256,7 +256,7 @@ with tab_live:
 
         with st.expander("Administrativ oppdatering", expanded=False):
             st.warning(
-                "Denne knappen tømmer den delte én-timescachen. Bruk den bare når du faktisk trenger helt ferske data."
+                "Ja, denne knappen tømmer den delte én-timescachen. Denne bruker jeg når jeg faktisk trenger helt nye data."
             )
             if st.button("Last ned data fra Finanstilsynet", key="force_refresh"):
                 tving_ny_nedlasting()
