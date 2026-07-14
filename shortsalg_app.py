@@ -169,7 +169,7 @@ def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
             height=600,
             legend_title_text="Utsteder",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # -------------------- APP --------------------
@@ -256,9 +256,9 @@ with tab_live:
 
         with st.expander("Administrativ oppdatering", expanded=False):
             st.warning(
-                "Ja, denne knappen tømmer den delte én-timescachen. Denne bruker jeg når jeg faktisk trenger helt nye data."
+                "Her er det bare å prøve den ut med ferske data :)"
             )
-            if st.button("Last ned data fra Finanstilsynet", key="force_refresh"):
+            if st.button("Kjør nedlasting fra Finanstilsynet", key="force_refresh"):
                 tving_ny_nedlasting()
                 st.rerun()
 
@@ -331,7 +331,7 @@ with tab_top10:
                 labels={"issuerName": "Selskap", "shortPercent": "Shortandel (%)"},
             )
             fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-            st.plotly_chart(fig_bar, width="stretch")
+            st.plotly_chart(fig_bar, use_container_width=True)
             st.dataframe(top10, width="stretch", hide_index=True)
 
             names = top10["issuerName"].tolist()
@@ -365,7 +365,7 @@ with tab_top10:
                         labels={"x": "Dato", "y": "Selskap", "color": "Endring (%)"},
                     )
                     fig_heat.update_layout(template="plotly_white", height=600)
-                    st.plotly_chart(fig_heat, width="stretch")
+                    st.plotly_chart(fig_heat, use_container_width=True)
 
 
 with tab_about:

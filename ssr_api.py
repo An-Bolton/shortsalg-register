@@ -103,7 +103,7 @@ def _normaliser_payload(data):
     return df
 
 
-@st.cache_resource(ttl=3600, max_entries=1, show_spinner=False)
+@st.cache_data(ttl=3600, max_entries=1, show_spinner=False)
 def hent_fullt_register(max_retries=3):
     """
     Henter og normaliserer hele registeret én gang per time, delt mellom alle brukere.
@@ -175,7 +175,7 @@ def _ensure_schema(conn):
     conn.commit()
 
 
-@st.cache_resource(ttl=300, max_entries=1, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=1, show_spinner=False)
 def hent_database_data(db_path=DB_PATH):
     """Leser SQLite-data én gang per fem minutter, delt mellom brukerne."""
     try:
@@ -252,6 +252,7 @@ def lagre_i_database(df, db_path=DB_PATH):
 
     _clear_database_cache()
     return int(new_rows)
+
 
 def hent_siste_oppdatering(db_path=DB_PATH):
     try:
