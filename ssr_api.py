@@ -253,7 +253,6 @@ def lagre_i_database(df, db_path=DB_PATH):
     _clear_database_cache()
     return int(new_rows)
 
-
 def hent_siste_oppdatering(db_path=DB_PATH):
     try:
         with _DB_LOCK:
