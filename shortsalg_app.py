@@ -10,7 +10,6 @@ from ssr_api import (
     tving_ny_nedlasting,
 )
 
-
 # -------------------- DATAHJELPERE --------------------
 
 def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
@@ -236,8 +235,8 @@ tab_live, tab_db, tab_top10, tab_about = st.tabs(
 with tab_live:
     st.header("Live data fra Finanstilsynet")
     st.info(
-        "Registeret hentes automatisk og deles mellom alle besøkende. "
-        "Dermed slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
+        "Ja, dette registeret hentes automatisk og deles mellom alle besøkende. "
+        "Og dermed slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
     )
 
     if df_live.empty:
@@ -256,9 +255,9 @@ with tab_live:
 
         with st.expander("Administrativ oppdatering", expanded=False):
             st.warning(
-                "Denne knappen tømmer den delte én-timescachen. Bruk den bare når du faktisk trenger helt ferske data."
+                "Knappen under mellomlagrer dataene"
             )
-            if st.button("Tving ny nedlasting fra Finanstilsynet", key="force_refresh"):
+            if st.button("Trykk her for nedlasting fra av short-info Finanstilsynet", key="force_refresh"):
                 tving_ny_nedlasting()
                 st.rerun()
 
@@ -274,7 +273,7 @@ with tab_live:
         vis_sok_og_graf(df_live, "live")
 
     st.divider()
-    st.subheader("Status for SQLite-registeret")
+    st.subheader("Status for Shortsalg-registeret")
     latest_time, total_rows = hent_siste_oppdatering()
     if latest_time:
         st.markdown(f"**Sist lagret:** {latest_time}  \n**Totalt antall rader:** {total_rows:,}")
