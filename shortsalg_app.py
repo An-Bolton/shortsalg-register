@@ -451,7 +451,7 @@ st.markdown(
 
     <div class="hero">
         <div class="hero-kicker">Velkommen!</div>
-        <h1 class="hero-title">Shortsalg Register</h1>
+        <h1 class="hero-title">Shortsalg-register fra Finanstilsynet</h1>
         <p class="hero-copy">
             Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde ved University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
             Følg utvikling, oppdag nye posisjoner og analyser markedets mest shortede aksjer. Shortregisteret fra Finanstilsynet oppdateres fra dem hver handelsdag kl. 15:30 CET.
