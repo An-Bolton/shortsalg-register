@@ -167,8 +167,12 @@ def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
             hovermode="x unified",
             height=600,
             legend_title_text="Utsteder",
+            paper_bgcolor="#ffffff",
+            plot_bgcolor="#ffffff",
+            font=dict(color="#0f172a"),
+            margin=dict(l=20, r=20, t=70, b=20),
         )
-        st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_short_chart")
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_short_chart")
 
 
 # -------------------- APP --------------------
@@ -177,46 +181,288 @@ st.set_page_config(page_title="Shortsalg-register", layout="wide")
 st.markdown(
     """
     <style>
-    section.main > div.block-container, .block-container {
-        padding-top: 0.6rem !important;
-        padding-left: 1.2rem !important;
-        padding-right: 1.2rem !important;
-        max-width: 100% !important;
+    :root {
+        --bg: #050914;
+        --panel: rgba(11, 18, 32, 0.88);
+        --panel-2: rgba(15, 25, 45, 0.92);
+        --border: rgba(95, 140, 255, 0.22);
+        --blue: #4f7cff;
+        --cyan: #22d3ee;
+        --purple: #8b5cf6;
+        --green: #22c55e;
+        --red: #fb7185;
+        --text: #f8fafc;
+        --muted: #94a3b8;
     }
-    .euronext-title {
-        background-color: #7f95a8;
-        color: white !important;
-        padding: 60px;
-        font-size: 34px;
+
+    html, body, [class*="css"] {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .stApp {
+        background:
+            radial-gradient(circle at 84% 3%, rgba(79, 124, 255, 0.10), transparent 24%),
+            linear-gradient(180deg, #f7f9fc 0%, #eef3f9 100%);
+        color: #0f172a;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(247, 249, 252, 0.88);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    [data-testid="stToolbar"] {
+        right: 1rem;
+    }
+
+    section.main > div.block-container, .block-container {
+        padding-top: 1.25rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1480px !important;
+    }
+
+    .hero {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 26px;
+        padding: 34px 38px;
+        margin: 6px 0 22px 0;
+        background:
+            linear-gradient(130deg, rgba(9, 18, 36, 0.96), rgba(10, 18, 34, 0.84)),
+            radial-gradient(circle at 86% 20%, rgba(34, 211, 238, 0.22), transparent 34%);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+    }
+
+    .hero:after {
+        content: "";
+        position: absolute;
+        width: 360px;
+        height: 360px;
+        right: -100px;
+        top: -180px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(79,124,255,.32), rgba(79,124,255,0));
+        filter: blur(3px);
+    }
+
+    .hero-kicker {
+        color: var(--cyan);
+        font-size: 0.82rem;
         font-weight: 800;
         text-transform: uppercase;
-        letter-spacing: 1px;
-        margin: 20px 0 0 0;
+        letter-spacing: 0.17em;
+        margin-bottom: 10px;
     }
+
+    .hero-title {
+        font-size: clamp(2.15rem, 5vw, 4.25rem);
+        line-height: 0.98;
+        margin: 0;
+        font-weight: 900;
+        letter-spacing: -0.045em;
+        background: linear-gradient(90deg, #ffffff 12%, #b7d5ff 55%, #67e8f9 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .hero-copy {
+        color: #b7c3d5;
+        font-size: 1.02rem;
+        max-width: 760px;
+        margin: 16px 0 0 0;
+        line-height: 1.65;
+    }
+
+    .hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .hero-badge {
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(103, 232, 249, 0.18);
+        background: rgba(15, 35, 58, 0.72);
+        color: #dbeafe;
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+
+    div[data-testid="stMetric"] {
+        background: rgba(255,255,255,0.94);
+        border: 1px solid rgba(79, 124, 255, 0.16);
+        border-radius: 18px;
+        padding: 18px 20px;
+        box-shadow: 0 12px 30px rgba(15,23,42,.08);
+    }
+
+    div[data-testid="stMetric"] label {
+        color: #64748b !important;
+        font-size: 0.78rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 800 !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        color: #0f172a !important;
+        font-size: 1.85rem !important;
+        font-weight: 900 !important;
+    }
+
+    div[data-testid="stMetricDelta"] {
+        font-weight: 800 !important;
+    }
+
     .stTabs [data-baseweb="tab-list"] {
-        background: linear-gradient(90deg, #4169E1, #1E3FAF) !important;
-        border-bottom: 2px solid #0f2f8f !important;
-        gap: 0 !important;
-        min-height: 58px !important;
-        overflow-x: auto !important;
+        gap: 8px !important;
+        background: rgba(255,255,255,0.88) !important;
+        border: 1px solid rgba(79, 124, 255, 0.14);
+        border-radius: 16px;
+        padding: 7px !important;
+        margin-bottom: 18px;
+        backdrop-filter: blur(14px);
     }
+
     .stTabs [data-baseweb="tab"] {
-        color: white !important;
-        min-height: 58px !important;
-        padding: 0 22px !important;
-        font-weight: 700 !important;
-        text-transform: uppercase !important;
+        min-height: 46px !important;
+        padding: 0 18px !important;
+        border-radius: 11px !important;
+        color: #475569 !important;
+        font-weight: 800 !important;
+        transition: all .2s ease;
     }
-    .stTabs [data-baseweb="tab"] p { color: white !important; font-weight: 700 !important; }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] { background-color: #eeece6 !important; }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] p { color: black !important; }
-    .stTabs [data-baseweb="tab-highlight"] { background-color: transparent !important; height: 0 !important; }
-    @media (max-width: 700px) {
-        .euronext-title { font-size: 24px; padding: 20px; }
-        .stTabs [data-baseweb="tab"] { padding: 0 14px !important; }
+
+    .stTabs [data-baseweb="tab"] p {
+        color: inherit !important;
+        font-size: 0.9rem !important;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(79, 124, 255, 0.13) !important;
+        color: white !important;
+    }
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #315cff, #7048f5) !important;
+        color: white !important;
+        box-shadow: 0 10px 28px rgba(72, 92, 255, 0.28);
+    }
+
+    .stTabs [data-baseweb="tab-highlight"] {
+        display: none !important;
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: rgba(95, 140, 255, 0.15) !important;
+        border-radius: 18px !important;
+    }
+
+    [data-testid="stExpander"] {
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(79, 124, 255, 0.14);
+        border-radius: 16px;
+        overflow: hidden;
+    }
+
+    [data-testid="stDataFrame"] {
+        background: white;
+        border: 1px solid rgba(79, 124, 255, 0.14);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 14px 36px rgba(0,0,0,.16);
+    }
+
+    [data-testid="stPlotlyChart"] {
+        background: #ffffff;
+        border: 1px solid rgba(79, 124, 255, 0.14);
+        border-radius: 18px;
+        padding: 10px;
+        box-shadow: 0 14px 32px rgba(15,23,42,.08);
+        overflow: hidden;
+    }
+
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    [data-testid="stTextInput"] input {
+        background: white !important;
+        border-color: rgba(79, 124, 255, 0.20) !important;
+        color: #0f172a !important;
+    }
+
+    .stButton > button,
+    .stDownloadButton > button {
+        border: 1px solid rgba(103, 232, 249, 0.2) !important;
+        background: linear-gradient(135deg,#0f172a,#1e3a8a); !important;
+        color: white !important;
+        border-radius: 12px !important;
+        padding: 0.65rem 1.05rem !important;
+        font-weight: 850 !important;
+        box-shadow: 0 10px 25px rgba(61, 82, 255, 0.23);
+        transition: transform .2s ease, box-shadow .2s ease;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 30px rgba(61, 82, 255, 0.34);
+        border-color: rgba(103, 232, 249, 0.52) !important;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 14px;
+        border: 1px solid rgba(79, 124, 255, 0.14);
+        background: rgba(255,255,255,0.92);
+    }
+
+    h1, h2, h3 {
+        color: #0f172a !important;
+        letter-spacing: -0.025em;
+    }
+
+    p, label, .stCaption, [data-testid="stCaptionContainer"] {
+        color: #475569;
+    }
+
+    hr {
+        border-color: rgba(148, 163, 184, 0.12) !important;
+    }
+
+    @media (max-width: 760px) {
+        section.main > div.block-container, .block-container {
+            padding-left: 0.85rem !important;
+            padding-right: 0.85rem !important;
+        }
+        .hero {
+            padding: 25px 22px;
+            border-radius: 20px;
+        }
+        .hero-title {
+            font-size: 2.45rem;
+        }
     }
     </style>
-    <div class="euronext-title">Shortsalg-register fra Finanstilsynet</div>
+
+    <div class="hero">
+        <div class="hero-kicker">Velkommen!</div>
+        <h1 class="hero-title">Shortsalg Register</h1>
+        <p class="hero-copy">
+            Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde på University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
+            Følg utvikling, oppdag nye posisjoner og analyser markedets mest shortede aksjer. Shortregisteret fra Finanstilsynet oppdateres fra dem hver handelsdag kl. 15:30 CET.
+        </p>
+        <div class="hero-badges">
+            <span class="hero-badge"> Live Finanstilsynet-data</span>
+            <span class="hero-badge"> Interaktive analyser</span>
+            <span class="hero-badge"> Historisk SQLite-register</span>
+            <span class="hero-badge"> Søk på selskap og ISIN</span>
+        </div>
+    </div>
     """,
     unsafe_allow_html=True,
 )
@@ -229,35 +475,50 @@ with st.spinner("Laster delt datagrunnlag …"):
 df_db = hent_database_data()
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live data", "Søk i selskaper", "Topp 10 mest shortede", "Om plattformen"]
+    ["Live oversikt", "Søk i selskaper", "Topp 10", "Om plattformen"]
 )
 
 with tab_live:
-    st.header("Live data fra Finanstilsynet")
+    st.header("Live markedsoversikt")
     st.info(
-        "Ja, dette registeret hentes automatisk og deles mellom alle besøkende. "
-        "Og dermed slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
+        "Hei og velkommen :) Dette registeret hentes automatisk og deles mellom alle besøkende."
+        "Dermed så slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
     )
 
     if df_live.empty:
         st.error("Klarte ikke hente data fra Finanstilsynet akkurat nå.")
     else:
-        col1, col2, col3 = st.columns([1, 1, 2])
-        col1.metric("Rader i live-registeret", f"{len(df_live):,}")
-        col2.metric("Unike selskaper", f"{df_live['issuerName'].nunique():,}")
+        latest_date = pd.to_datetime(df_live["date"], errors="coerce").max()
+        total_short = _standardiser_shortpercent(df_live)["shortPercent"].sum()
+        max_short = _standardiser_shortpercent(df_live)["shortPercent"].max()
 
-        with col3:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Live-posisjoner", f"{len(df_live):,}")
+        col2.metric("Unike selskaper", f"{df_live['issuerName'].nunique():,}")
+        col3.metric("Aggregert short", f"{total_short:,.2f} %")
+        col4.metric("Største enkeltposisjon", f"{max_short:,.2f} %")
+
+        st.caption(
+            "Siste registrerte dato: "
+            + (latest_date.strftime("%d.%m.%Y") if pd.notna(latest_date) else "ukjent")
+        )
+
+        action_left, action_right = st.columns([1, 2])
+        with action_left:
             if st.button("Lagre nye rader i SQLite", key="save_live"):
                 with st.spinner("Sammenligner og lagrer nye rader …"):
                     new_rows = lagre_i_database(df_live)
                 st.success(f"Ferdig. {new_rows:,} nye rader ble lagret.")
                 st.rerun()
 
-        with st.expander("Administrativ oppdatering", expanded=False):
+        with action_right:
+            st.info("Den delte cachen reduserer belastning og gjør appen mer stabil ved høy trafikk.")
+
+        with st.expander("Administrativ oppdatering (man må inn her for å laste ned short-registeret)", expanded=False):
             st.warning(
-                "Knappen under mellomlagrer dataene"
+                "Denne knappen tømmer den delte én-timescachen. Bruk den bare når man faktisk trenger helt nye data."
             )
-            if st.button("Trykk her for nedlasting fra av short-info Finanstilsynet", key="force_refresh"):
+            if st.button("Nedlasting fra Finanstilsynet", key="force_refresh"):
                 tving_ny_nedlasting()
                 st.rerun()
 
@@ -273,7 +534,7 @@ with tab_live:
         vis_sok_og_graf(df_live, "live")
 
     st.divider()
-    st.subheader("Status for Shortsalg-registeret")
+    st.subheader("Status for SQLite-registeret")
     latest_time, total_rows = hent_siste_oppdatering()
     if latest_time:
         st.markdown(f"**Sist lagret:** {latest_time}  \n**Totalt antall rader:** {total_rows:,}")
@@ -282,7 +543,7 @@ with tab_live:
 
 
 with tab_db:
-    st.header("Søk i lagret historikk")
+    st.header("Søk i historiske shortposisjoner")
     if df_db.empty:
         st.info("SQLite-databasen er tom. Lagre live-registeret først.")
     else:
@@ -292,7 +553,7 @@ with tab_db:
 
 
 with tab_top10:
-    st.header("Topp 10 mest shortede selskaper")
+    st.header("Markedets mest shortede selskaper")
     if df_db.empty:
         st.info("SQLite-databasen er tom. Lagre live-registeret først.")
     else:
@@ -329,8 +590,16 @@ with tab_top10:
                 title=f"Topp 10 – gjennomsnittlig shortandel siste {days} dager",
                 labels={"issuerName": "Selskap", "shortPercent": "Shortandel (%)"},
             )
-            fig_bar.update_layout(template="plotly_white", xaxis_tickangle=-45, height=500)
-            st.plotly_chart(fig_bar, width="stretch")
+            fig_bar.update_layout(
+                template="plotly_white",
+                xaxis_tickangle=-35,
+                height=500,
+                paper_bgcolor="#ffffff",
+                plot_bgcolor="#ffffff",
+                font=dict(color="#0f172a"),
+                margin=dict(l=20, r=20, t=70, b=20),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True, key="top10_bar_chart")
             st.dataframe(top10, width="stretch", hide_index=True)
 
             names = top10["issuerName"].tolist()
@@ -348,8 +617,16 @@ with tab_top10:
                     title="Utvikling over tid for Topp 10",
                     labels={"date": "Dato", "shortPercent": "Shortandel (%)", "issuerName": "Selskap"},
                 )
-                fig_line.update_layout(template="plotly_white", hovermode="x unified", height=600)
-                st.plotly_chart(fig_line, width="stretch")
+                fig_line.update_layout(
+                    template="plotly_white",
+                    hovermode="x unified",
+                    height=600,
+                    paper_bgcolor="#ffffff",
+                    plot_bgcolor="#ffffff",
+                    font=dict(color="#0f172a"),
+                    margin=dict(l=20, r=20, t=70, b=20),
+                )
+                st.plotly_chart(fig_line, use_container_width=True, key="top10_line_chart")
 
                 heat = (
                     development.pivot_table(index="issuerName", columns="date", values="shortPercent")
@@ -363,8 +640,14 @@ with tab_top10:
                         title="Daglige endringer i shortandel",
                         labels={"x": "Dato", "y": "Selskap", "color": "Endring (%)"},
                     )
-                    fig_heat.update_layout(template="plotly_white", height=600)
-                    st.plotly_chart(fig_heat, width="stretch")
+                    fig_heat.update_layout(
+                        template="plotly_white",
+                        height=600,
+                        paper_bgcolor="#ffffff",
+                        font=dict(color="#0f172a"),
+                        margin=dict(l=20, r=20, t=70, b=20),
+                    )
+                    st.plotly_chart(fig_heat, use_container_width=True, key="top10_heatmap")
 
 
 with tab_about:
