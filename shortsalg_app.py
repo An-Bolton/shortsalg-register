@@ -453,7 +453,7 @@ st.markdown(
         <div class="hero-kicker">Velkommen!</div>
         <h1 class="hero-title">Shortsalg Register</h1>
         <p class="hero-copy">
-            Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde på University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
+            Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde ved University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
             Følg utvikling, oppdag nye posisjoner og analyser markedets mest shortede aksjer. Shortregisteret fra Finanstilsynet oppdateres fra dem hver handelsdag kl. 15:30 CET.
         </p>
         <div class="hero-badges">
@@ -481,7 +481,7 @@ tab_live, tab_db, tab_top10, tab_about = st.tabs(
 with tab_live:
     st.header("Live markedsoversikt")
     st.info(
-        "Hei og velkommen :) Dette registeret hentes automatisk og deles mellom alle besøkende."
+        "Dette registeret hentes automatisk og deles mellom alle besøkende."
         "Dermed så slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
     )
 
