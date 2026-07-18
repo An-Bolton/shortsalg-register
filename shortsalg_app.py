@@ -454,7 +454,7 @@ st.markdown(
         <h1 class="hero-title">Shortsalg-register fra Finanstilsynet</h1>
         <p class="hero-copy">
             Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde ved University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
-            Følg utvikling, oppdag nye posisjoner og analyser markedets mest shortede aksjer. Shortregisteret fra Finanstilsynet oppdateres fra dem hver handelsdag kl. 15:30 CET.
+            Her kan man følge utviklingen, oppdage nye posisjoner og analyser av markedets mest shortede aksjer. Finanstilsynet gjør en oppdatering hver handelsdag kl. 15:30 CET. Kilde: https://ssr.finanstilsynet.no/api/v2/
         </p>
         <div class="hero-badges">
             <span class="hero-badge"> Live Finanstilsynet-data</span>
@@ -658,7 +658,7 @@ with tab_about:
         Short Sale Register. Den er utviklet for læring, markedsinnsikt og enklere tilgang til
         historiske data.
 
-        **Teknologi:** Python, Streamlit, Pandas, Plotly og SQLite.
+        **Teknologi:** Python, Streamlit, Pandas, Plotly og SQLite. API fra Finanstilsynet: https://ssr.finanstilsynet.no/api/v2/
 
         **Utvikler:** Andreas Bolton Seielstad.
         """
