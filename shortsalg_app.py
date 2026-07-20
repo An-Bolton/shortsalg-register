@@ -516,7 +516,7 @@ with tab_live:
 
         with st.expander("Administrativ oppdatering (man må inn her for å laste ned short-registeret)", expanded=False):
             st.warning(
-                "Denne knappen tømmer den delte én-timescachen. Bruk den bare når man faktisk trenger helt nye data."
+                "Denne knappen tømmer den delte én-timescachen. Det er bare å bruke den når man faktisk trenger helt nye data, ikke nødvendig ellers."
             )
             if st.button("Nedlasting fra Finanstilsynet", key="force_refresh"):
                 tving_ny_nedlasting()
