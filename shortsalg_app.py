@@ -68,41 +68,100 @@ def dataframe_to_csv(df: pd.DataFrame) -> bytes:
 def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
     with st.expander("Hurtig-innsikt: største endringer og nye posisjoner", expanded=expanded):
         left, right = st.columns(2)
+
         with left:
             st.markdown("### Største endringer")
             changes = beregn_storste_endringer(df)
+
             if changes.empty:
                 st.info("Ingen endringer å vise.")
             else:
+                changes_view = changes.copy()
+                changes_view["Retning"] = changes_view["endring"].apply(
+                    lambda value: "▲ Økning" if value > 0 else "▼ Reduksjon"
+                )
+                changes_view["Fra → til"] = changes_view.apply(
+                    lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
+                    axis=1,
+                )
+                changes_view["date"] = pd.to_datetime(
+                    changes_view["date"], errors="coerce"
+                ).dt.strftime("%d.%m.%Y")
+
+                changes_view = (
+                    changes_view[
+                        ["issuerName", "Retning", "Fra → til", "endring", "date"]
+                    ]
+                    .rename(
+                        columns={
+                            "issuerName": "Selskap",
+                            "endring": "Endring (pp)",
+                            "date": "Dato",
+                        }
+                    )
+                    .head(20)
+                )
+
                 st.dataframe(
-                    changes[["issuerName", "shortPercent", "endring", "date"]]
-                    .rename(columns={
-                        "issuerName": "Selskap",
-                        "shortPercent": "Short %",
-                        "endring": "Endring",
-                        "date": "Dato",
-                    })
-                    .head(20),
+                    changes_view,
                     width="stretch",
                     hide_index=True,
+                    column_config={
+                        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+                        "Retning": st.column_config.TextColumn("Retning", width="small"),
+                        "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                        "Endring (pp)": st.column_config.NumberColumn(
+                            "Endring (pp)", format="%.2f"
+                        ),
+                        "Dato": st.column_config.TextColumn("Dato", width="small"),
+                    },
                 )
+
         with right:
             st.markdown("### Nye posisjoner over 0,5 %")
             new_positions = finn_nye_shortposisjoner(df)
+
             if new_positions.empty:
                 st.info("Ingen nye posisjoner å vise.")
             else:
+                new_positions_view = new_positions.copy()
+                new_positions_view["forrige_short"] = new_positions_view[
+                    "forrige_short"
+                ].fillna(0.0)
+                new_positions_view["Fra → til"] = new_positions_view.apply(
+                    lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
+                    axis=1,
+                )
+                new_positions_view["date"] = pd.to_datetime(
+                    new_positions_view["date"], errors="coerce"
+                ).dt.strftime("%d.%m.%Y")
+
+                new_positions_view = (
+                    new_positions_view[
+                        ["issuerName", "Fra → til", "shortPercent", "date"]
+                    ]
+                    .rename(
+                        columns={
+                            "issuerName": "Selskap",
+                            "shortPercent": "Ny short %",
+                            "date": "Dato",
+                        }
+                    )
+                    .head(20)
+                )
+
                 st.dataframe(
-                    new_positions[["issuerName", "shortPercent", "forrige_short", "date"]]
-                    .rename(columns={
-                        "issuerName": "Selskap",
-                        "shortPercent": "Short %",
-                        "forrige_short": "Forrige %",
-                        "date": "Dato",
-                    })
-                    .head(20),
+                    new_positions_view,
                     width="stretch",
                     hide_index=True,
+                    column_config={
+                        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+                        "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                        "Ny short %": st.column_config.NumberColumn(
+                            "Ny short %", format="%.2f %%"
+                        ),
+                        "Dato": st.column_config.TextColumn("Dato", width="small"),
+                    },
                 )
 
 
@@ -123,7 +182,7 @@ def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
         key=f"{key_prefix}_search",
     ).strip()
 
-    filtered = df
+    filtered = df.copy()
     if search:
         issuer_mask = (
             filtered["issuerName"].fillna("").astype(str)
@@ -141,15 +200,113 @@ def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
         options=issuers,
         default=issuers[:1] if search and issuers else [],
         key=f"{key_prefix}_issuers",
+        placeholder="Velg selskaper – tomt valg viser alle",
     )
 
-    shown = filtered.loc[filtered["issuerName"].astype(str).isin(selected)] if selected else filtered
+    shown = (
+        filtered.loc[filtered["issuerName"].astype(str).isin(selected)].copy()
+        if selected
+        else filtered.copy()
+    )
     if shown.empty:
         st.info("Ingen treff for søket eller filteret.")
         return
 
-    st.caption(f"Viser {len(shown):,} av {len(df):,} rader.")
-    st.dataframe(_standardiser_shortpercent(shown).head(1000), width="stretch", hide_index=True)
+    shown = _standardiser_shortpercent(shown)
+    shown["date"] = pd.to_datetime(shown["date"], errors="coerce")
+    shown = shown.dropna(subset=["issuerName", "date", "shortPercent"])
+
+    # Beregn endring mot forrige registrerte nivå for hvert selskap.
+    shown = shown.sort_values(["issuerName", "date"])
+    shown["Endring (pp)"] = shown.groupby("issuerName")["shortPercent"].diff()
+    shown["Trend"] = shown["Endring (pp)"].apply(
+        lambda value: (
+            "▲ Økning" if pd.notna(value) and value > 0
+            else "▼ Reduksjon" if pd.notna(value) and value < 0
+            else "— Uendret"
+        )
+    )
+    shown = shown.sort_values(["date", "issuerName"], ascending=[False, True])
+
+    controls_left, controls_middle, controls_right = st.columns([1.25, 1, 1])
+    with controls_left:
+        advanced = st.toggle(
+            "Vis avanserte kolonner",
+            value=False,
+            key=f"{key_prefix}_advanced_columns",
+        )
+    with controls_middle:
+        max_rows = st.selectbox(
+            "Rader i tabellen",
+            options=[25, 50, 100, 250, 500, 1000],
+            index=3,
+            key=f"{key_prefix}_max_rows",
+        )
+    with controls_right:
+        newest_only = st.toggle(
+            "Kun siste rad per selskap",
+            value=False,
+            key=f"{key_prefix}_latest_only",
+        )
+
+    if newest_only:
+        shown = shown.sort_values("date").groupby("issuerName", as_index=False).tail(1)
+        shown = shown.sort_values(["shortPercent", "issuerName"], ascending=[False, True])
+
+    shown["Posisjonsholder"] = (
+        shown.get("positionHolder", pd.Series(index=shown.index, dtype="object"))
+        .fillna("Aggregert")
+        .replace({"None": "Aggregert", "": "Aggregert"})
+    )
+    shown["Dato"] = shown["date"].dt.strftime("%d.%m.%Y")
+    shown["Selskap"] = shown["issuerName"].astype(str)
+    shown["Short %"] = shown["shortPercent"]
+    shown["ISIN"] = shown["isin"].fillna("—").astype(str)
+
+    if "shares" in shown.columns:
+        shown["Aksjer"] = pd.to_numeric(shown["shares"], errors="coerce")
+    else:
+        shown["Aksjer"] = pd.NA
+
+    base_columns = ["Selskap", "Dato", "Short %", "Endring (pp)", "Trend"]
+    advanced_columns = ["ISIN", "Posisjonsholder", "Aksjer"]
+    display_columns = base_columns + advanced_columns if advanced else base_columns
+    table_view = shown[display_columns].head(max_rows)
+
+    info_left, info_right = st.columns([2, 1])
+    with info_left:
+        st.caption(
+            f"Viser {len(table_view):,} av {len(shown):,} filtrerte rader "
+            f"({len(df):,} rader totalt)."
+        )
+    with info_right:
+        st.download_button(
+            "Eksporter viste data",
+            data=dataframe_to_csv(table_view),
+            file_name=f"shortposisjoner_{key_prefix}.csv",
+            mime="text/csv",
+            key=f"{key_prefix}_export_table",
+            width="stretch",
+        )
+
+    column_config = {
+        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+        "Dato": st.column_config.TextColumn("Dato", width="small"),
+        "Short %": st.column_config.NumberColumn("Short %", format="%.2f %%"),
+        "Endring (pp)": st.column_config.NumberColumn("Endring (pp)", format="%+.2f"),
+        "Trend": st.column_config.TextColumn("Trend", width="small"),
+        "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+        "Posisjonsholder": st.column_config.TextColumn("Posisjonsholder", width="medium"),
+        "Aksjer": st.column_config.NumberColumn("Aksjer", format="%d"),
+    }
+
+    st.dataframe(
+        table_view,
+        width="stretch",
+        hide_index=True,
+        column_config=column_config,
+        height=min(760, 42 + 35 * min(len(table_view), 20)),
+    )
 
     plot_data = _agg_issuer_date(shown)
     if not plot_data.empty:
