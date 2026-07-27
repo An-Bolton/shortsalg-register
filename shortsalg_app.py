@@ -682,7 +682,7 @@ st.markdown(
         <div class="hero-badges">
             <span class="hero-badge"> Live Finanstilsynet-data</span>
             <span class="hero-badge"> Interaktive analyser</span>
-            <span class="hero-badge"> Historisk SQLite-register</span>
+            <span class="hero-badge"> SQLite-register</span>
             <span class="hero-badge"> Søk på selskap og ISIN</span>
         </div>
     </div>
@@ -883,7 +883,7 @@ with tab_live:
                 "Oppdater historikk",
                 key="save_live",
                 width="stretch",
-                help="Lagrer bare nye rader i den historiske SQLite-databasen.",
+                help="Lagrer bare nye rader i SQLite-databasen.",
             ):
                 with st.spinner("Sammenligner og lagrer nye rader …"):
                     new_rows = lagre_i_database(df_live)
