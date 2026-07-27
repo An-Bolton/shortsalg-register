@@ -1,3 +1,5 @@
+import html
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -477,6 +479,55 @@ st.markdown(
         font-weight: 800 !important;
     }
 
+    .insight-card {
+        min-height: 190px;
+        padding: 20px 22px;
+        border: 1px solid rgba(79, 124, 255, 0.16);
+        border-radius: 18px;
+        background:
+            radial-gradient(circle at 92% 8%, rgba(79, 124, 255, 0.12), transparent 34%),
+            rgba(255, 255, 255, 0.96);
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+        transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+
+    .insight-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 18px 38px rgba(15, 23, 42, 0.13);
+        border-color: rgba(79, 124, 255, 0.34);
+    }
+
+    .insight-kicker {
+        color: #64748b;
+        font-size: 0.74rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        margin-bottom: 10px;
+    }
+
+    .insight-value {
+        color: #0f172a;
+        font-size: 1.75rem;
+        line-height: 1.1;
+        font-weight: 900;
+        margin-bottom: 10px;
+    }
+
+    .insight-company {
+        color: #1e3a8a;
+        font-size: 1rem;
+        line-height: 1.3;
+        font-weight: 850;
+        margin-bottom: 10px;
+    }
+
+    .insight-detail {
+        color: #64748b;
+        font-size: 0.82rem;
+        line-height: 1.55;
+    }
+
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px !important;
         background: rgba(255,255,255,0.88) !important;
@@ -636,54 +687,202 @@ tab_live, tab_db, tab_top10, tab_about = st.tabs(
 )
 
 with tab_live:
-    st.header("Live markedsoversikt")
+    title_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
+
+    with title_col:
+        st.header("Live markedsoversikt")
+
+    with refresh_col:
+        if st.button(
+            "↻ Oppdater fra Finanstilsynet",
+            key="force_refresh",
+            width="stretch",
+            help="Tømmer den delte én-timescachen og henter registeret på nytt.",
+        ):
+            st.session_state["show_refresh_success"] = True
+            tving_ny_nedlasting()
+            st.rerun()
+
     st.info(
-        "Dette registeret hentes automatisk og deles mellom alle besøkende."
-        "Dermed så slipper hver bruker å laste ned og lagre sin egen kopi i minnet."
+        "Registeret oppdateres automatisk fra Finanstilsynet. Ved å dele én felles datakilde mellom alle besøkende blir plattformen både raskere og mer stabil."
     )
+
+    if st.session_state.pop("show_refresh_success", False):
+        st.success("Registeret er oppdatert med de nyeste dataene fra Finanstilsynet.")
 
     if df_live.empty:
         st.error("Klarte ikke hente data fra Finanstilsynet akkurat nå.")
     else:
         latest_date = pd.to_datetime(df_live["date"], errors="coerce").max()
-        total_short = _standardiser_shortpercent(df_live)["shortPercent"].sum()
-        max_short = _standardiser_shortpercent(df_live)["shortPercent"].max()
+
+        # Standardiser prosentverdiene én gang, og hent både største verdi og selskapet den gjelder.
+        live_data = _standardiser_shortpercent(df_live)
+        total_short = live_data["shortPercent"].sum()
+
+        valid_short = live_data.dropna(subset=["shortPercent"])
+        if valid_short.empty:
+            max_short = 0.0
+            max_short_company = "Ukjent selskap"
+            max_short_holder = "Ukjent posisjonsholder"
+            max_short_date = "Ukjent dato"
+        else:
+            max_short_row = valid_short.loc[valid_short["shortPercent"].idxmax()]
+            max_short = float(max_short_row["shortPercent"])
+            max_short_company = str(max_short_row.get("issuerName") or "Ukjent selskap")
+            max_short_holder = str(
+                max_short_row.get("positionHolder") or "Ikke oppgitt"
+            )
+            parsed_max_date = pd.to_datetime(max_short_row.get("date"), errors="coerce")
+            max_short_date = (
+                parsed_max_date.strftime("%d.%m.%Y")
+                if pd.notna(parsed_max_date)
+                else "Ukjent dato"
+            )
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Live-posisjoner", f"{len(df_live):,}")
         col2.metric("Unike selskaper", f"{df_live['issuerName'].nunique():,}")
-        col3.metric("Aggregert short", f"{total_short:,.2f} %")
-        col4.metric("Største enkeltposisjon", f"{max_short:,.2f} %")
+        col3.metric("Sum av rapporterte shortposisjoner", f"{total_short:,.2f} %")
+        col4.metric(
+            "Største enkeltposisjon",
+            f"{max_short:,.2f} %",
+            delta=max_short_company,
+            delta_color="off",
+        )
+
+        # Tre raske markedssignaler. Kortene viser detaljene direkte og har
+        # i tillegg et hover-felt via HTML-attributtet title.
+        changes = beregn_storste_endringer(live_data)
+        if changes.empty:
+            increase_value = "Ingen endring"
+            increase_company = "Ingen tilgjengelige data"
+            increase_detail = "Kan beregnes når minst to observasjoner finnes."
+        else:
+            increase_row = changes.sort_values("endring", ascending=False).iloc[0]
+            increase_value = f"{float(increase_row['endring']):+.2f} pp"
+            increase_company = str(increase_row.get("issuerName") or "Ukjent selskap")
+            increase_from = float(increase_row.get("forrige_short", 0.0))
+            increase_to = float(increase_row.get("shortPercent", 0.0))
+            increase_date = pd.to_datetime(increase_row.get("date"), errors="coerce")
+            increase_date_text = (
+                increase_date.strftime("%d.%m.%Y")
+                if pd.notna(increase_date)
+                else "ukjent dato"
+            )
+            increase_detail = (
+                f"Fra {increase_from:.2f} % til {increase_to:.2f} % · "
+                f"{increase_date_text}"
+            )
+
+        new_positions = finn_nye_shortposisjoner(live_data)
+        if new_positions.empty:
+            new_value = "Ingen nye"
+            new_company = "Ingen nye posisjoner over 0,5 %"
+            new_detail = "Basert på siste registrerte nivå per selskap."
+        else:
+            new_row = new_positions.sort_values(
+                ["date", "shortPercent"], ascending=[False, False]
+            ).iloc[0]
+            new_value = f"{float(new_row['shortPercent']):.2f} %"
+            new_company = str(new_row.get("issuerName") or "Ukjent selskap")
+            new_holder = str(new_row.get("positionHolder") or "Ikke oppgitt")
+            new_date = pd.to_datetime(new_row.get("date"), errors="coerce")
+            new_date_text = (
+                new_date.strftime("%d.%m.%Y")
+                if pd.notna(new_date)
+                else "ukjent dato"
+            )
+            new_detail = f"{new_holder} · Registrert {new_date_text}"
+
+        st.markdown("### Markedssignaler")
+        st.info(
+            "Dette er nyeste endring siden sist du besøkt shortregisteret mitt :) Her har jeg bare laget en enkel oversikt over største og nyeste posisjon for en rask oversikt.."
+        )
+        signal_col1, signal_col2, signal_col3 = st.columns(3)
+
+        largest_title = html.escape(
+            f"{max_short_holder} → {max_short_company} → "
+            f"{max_short:.2f} % → Registrert {max_short_date}"
+        )
+        increase_title = html.escape(
+            f"{increase_company} → {increase_value} → {increase_detail}"
+        )
+        new_title = html.escape(
+            f"{new_company} → {new_value} → {new_detail}"
+        )
+
+        with signal_col1:
+            st.markdown(
+                f"""
+                <div class="insight-card" title="{largest_title}">
+                    <div class="insight-kicker"> Største enkeltposisjon</div>
+                    <div class="insight-value">{max_short:.2f} %</div>
+                    <div class="insight-company">{html.escape(max_short_company)}</div>
+                    <div class="insight-detail">
+                        {html.escape(max_short_holder)}<br>
+                        Registrert {html.escape(max_short_date)}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with signal_col2:
+            st.markdown(
+                f"""
+                <div class="insight-card" title="{increase_title}">
+                    <div class="insight-kicker"> Største siste økning</div>
+                    <div class="insight-value">{html.escape(increase_value)}</div>
+                    <div class="insight-company">{html.escape(increase_company)}</div>
+                    <div class="insight-detail">{html.escape(increase_detail)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with signal_col3:
+            st.markdown(
+                f"""
+                <div class="insight-card" title="{new_title}">
+                    <div class="insight-kicker"> Nyeste posisjon over 0,5 %</div>
+                    <div class="insight-value">{html.escape(new_value)}</div>
+                    <div class="insight-company">{html.escape(new_company)}</div>
+                    <div class="insight-detail">{html.escape(new_detail)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         st.caption(
-            "Siste registrerte dato: "
+            " Siste markedsdata fra Finanstilsynet: "
             + (latest_date.strftime("%d.%m.%Y") if pd.notna(latest_date) else "ukjent")
         )
 
-        action_left, action_right = st.columns([1, 2])
+        action_left, action_right = st.columns(2)
+
         with action_left:
-            if st.button("Lagre nye rader i SQLite", key="save_live"):
+            if st.button(
+                "Oppdater historikk",
+                key="save_live",
+                width="stretch",
+                help="Lagrer bare nye rader i den historiske SQLite-databasen.",
+            ):
                 with st.spinner("Sammenligner og lagrer nye rader …"):
                     new_rows = lagre_i_database(df_live)
                 st.success(f"Ferdig. {new_rows:,} nye rader ble lagret.")
-                st.rerun()
 
         with action_right:
-            st.info("Den delte cachen reduserer belastning og gjør appen mer stabil ved høy trafikk.")
-
-        with st.expander("Administrativ oppdatering (man må inn her for å laste ned short-registeret)", expanded=False):
-            st.warning(
-                "Denne knappen tømmer den delte én-timescachen. Det er bare å bruke den når man faktisk trenger helt nye data, ikke nødvendig ellers."
+            st.download_button(
+                "Last ned registeret som CSV",
+                data=dataframe_to_csv(df_live),
+                file_name="shortregister.csv",
+                mime="text/csv",
+                width="stretch",
             )
-            if st.button("Nedlasting fra Finanstilsynet", key="force_refresh"):
-                tving_ny_nedlasting()
-                st.rerun()
 
-        st.download_button(
-            "Last ned live-registeret som CSV",
-            data=dataframe_to_csv(df_live),
-            file_name="shortregister.csv",
-            mime="text/csv",
+        st.caption(
+            "Oppdater-knappen øverst henter helt ferske data fra Finanstilsynet. "
+            "Historikk-knappen lagrer bare registreringer som ikke allerede finnes i databasen."
         )
 
         vis_hurtiginnsikt(df_live, expanded=True)
@@ -694,7 +893,7 @@ with tab_live:
     st.subheader("Status for SQLite-registeret")
     latest_time, total_rows = hent_siste_oppdatering()
     if latest_time:
-        st.markdown(f"**Sist lagret:** {latest_time}  \n**Totalt antall rader:** {total_rows:,}")
+        st.markdown(f" Historikk sist oppdatert: {latest_time}  \n Totalt antall lagrede rader: {total_rows:,}")
     else:
         st.info("Ingen lagringshistorikk er registrert ennå.")
 
