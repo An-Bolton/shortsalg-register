@@ -1005,7 +1005,6 @@ with tab_top10:
                     )
                     st.plotly_chart(fig_heat, use_container_width=True, key="top10_heatmap")
 
-
 with tab_about:
     st.header("Om plattformen")
     st.markdown(
