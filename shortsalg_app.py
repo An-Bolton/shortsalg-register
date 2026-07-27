@@ -38,6 +38,21 @@ def _agg_issuer_date(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def hent_siste_posisjon_per_selskap(df: pd.DataFrame) -> pd.DataFrame:
+    """Returnerer siste registrerte, aggregerte shortandel for hvert selskap."""
+    data = _agg_issuer_date(df)
+    if data.empty:
+        return data
+
+    return (
+        data.sort_values(["issuerName", "date"])
+        .groupby("issuerName", as_index=False)
+        .tail(1)
+        .sort_values(["shortPercent", "issuerName"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+
+
 def beregn_storste_endringer(df: pd.DataFrame) -> pd.DataFrame:
     data = _agg_issuer_date(df)
     if data.empty:
@@ -715,23 +730,26 @@ with tab_live:
     else:
         latest_date = pd.to_datetime(df_live["date"], errors="coerce").max()
 
-        # Standardiser prosentverdiene én gang, og hent både største verdi og selskapet den gjelder.
+        # Bruk siste registrerte, aggregerte shortandel per selskap.
+        # Dette samsvarer med "SUM SHORT %" i Finanstilsynets oversikt.
         live_data = _standardiser_shortpercent(df_live)
-        total_short = live_data["shortPercent"].sum()
+        current_positions = hent_siste_posisjon_per_selskap(live_data)
+        total_short = (
+            current_positions["shortPercent"].sum()
+            if not current_positions.empty
+            else 0.0
+        )
 
-        valid_short = live_data.dropna(subset=["shortPercent"])
-        if valid_short.empty:
+        if current_positions.empty:
             max_short = 0.0
             max_short_company = "Ukjent selskap"
-            max_short_holder = "Ukjent posisjonsholder"
+            max_short_holder = "Aggregert shortandel"
             max_short_date = "Ukjent dato"
         else:
-            max_short_row = valid_short.loc[valid_short["shortPercent"].idxmax()]
+            max_short_row = current_positions.iloc[0]
             max_short = float(max_short_row["shortPercent"])
             max_short_company = str(max_short_row.get("issuerName") or "Ukjent selskap")
-            max_short_holder = str(
-                max_short_row.get("positionHolder") or "Ikke oppgitt"
-            )
+            max_short_holder = "Aggregert shortandel"
             parsed_max_date = pd.to_datetime(max_short_row.get("date"), errors="coerce")
             max_short_date = (
                 parsed_max_date.strftime("%d.%m.%Y")
@@ -744,7 +762,7 @@ with tab_live:
         col2.metric("Unike selskaper", f"{df_live['issuerName'].nunique():,}")
         col3.metric("Sum av rapporterte shortposisjoner", f"{total_short:,.2f} %")
         col4.metric(
-            "Største enkeltposisjon",
+            "Største gjeldende shortandel",
             f"{max_short:,.2f} %",
             delta=max_short_company,
             delta_color="off",
@@ -796,7 +814,7 @@ with tab_live:
 
         st.markdown("### Markedssignaler")
         st.info(
-            "Dette er nyeste endring siden sist du besøkt shortregisteret mitt :) Her har jeg bare laget en enkel oversikt over største og nyeste posisjon for en rask oversikt.."
+            "Her vises gjeldende aggregerte shortandel, største siste endring og nyeste posisjon over 0,5 %. Tallene bygger på siste registrerte nivå per selskap."
         )
         signal_col1, signal_col2, signal_col3 = st.columns(3)
 
@@ -815,7 +833,7 @@ with tab_live:
             st.markdown(
                 f"""
                 <div class="insight-card" title="{largest_title}">
-                    <div class="insight-kicker"> Største enkeltposisjon</div>
+                    <div class="insight-kicker"> Største gjeldende shortandel</div>
                     <div class="insight-value">{max_short:.2f} %</div>
                     <div class="insight-company">{html.escape(max_short_company)}</div>
                     <div class="insight-detail">
