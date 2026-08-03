@@ -914,7 +914,6 @@ with tab_live:
     else:
         st.info("Ingen lagringshistorikk er registrert ennå.")
 
-
 with tab_db:
     st.header("Søk i historiske shortposisjoner")
     if df_db.empty:
