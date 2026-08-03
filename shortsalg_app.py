@@ -84,7 +84,7 @@ def dataframe_to_csv(df: pd.DataFrame) -> bytes:
 
 def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
     with st.expander("Hurtig-innsikt: største endringer og nye posisjoner", expanded=expanded):
-        left, right = st.columns(2)
+        left, right = st.columns([1, 1], gap="medium")
 
         with left:
             st.markdown("### Største endringer")
@@ -116,7 +116,7 @@ def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
                             "date": "Dato",
                         }
                     )
-                    .head(20)
+                    .head(10)
                 )
 
                 st.dataframe(
@@ -124,13 +124,13 @@ def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
                     width="stretch",
                     hide_index=True,
                     column_config={
-                        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
-                        "Retning": st.column_config.TextColumn("Retning", width="small"),
-                        "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                        "Selskap": st.column_config.TextColumn("Selskap", width=200),
+                        "Retning": st.column_config.TextColumn("Retning", width=90),
+                        "Fra → til": st.column_config.TextColumn("Fra → til", width=155),
                         "Endring (pp)": st.column_config.NumberColumn(
-                            "Endring (pp)", format="%.2f"
+                            "Endring (pp)", format="%.2f", width=95
                         ),
-                        "Dato": st.column_config.TextColumn("Dato", width="small"),
+                        "Dato": st.column_config.TextColumn("Dato", width=90),
                     },
                 )
 
@@ -164,7 +164,7 @@ def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
                             "date": "Dato",
                         }
                     )
-                    .head(20)
+                    .head(10)
                 )
 
                 st.dataframe(
@@ -172,12 +172,12 @@ def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
                     width="stretch",
                     hide_index=True,
                     column_config={
-                        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
-                        "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                        "Selskap": st.column_config.TextColumn("Selskap", width=220),
+                        "Fra → til": st.column_config.TextColumn("Fra → til", width=175),
                         "Ny short %": st.column_config.NumberColumn(
-                            "Ny short %", format="%.2f %%"
+                            "Ny short %", format="%.2f %%", width=95
                         ),
-                        "Dato": st.column_config.TextColumn("Dato", width="small"),
+                        "Dato": st.column_config.TextColumn("Dato", width=90),
                     },
                 )
 
