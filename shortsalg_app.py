@@ -697,7 +697,7 @@ with st.spinner("Laster delt datagrunnlag …"):
 df_db = hent_database_data()
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live oversikt", "Søk i selskaper", "Topp 10", "Om plattformen"]
+    ["Live-oversikt", "Søk i selskaper", "Topp 10", "Om plattformen"]
 )
 
 with tab_live:
