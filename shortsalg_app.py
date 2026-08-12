@@ -6,6 +6,7 @@ import streamlit as st
 from ssr_api import (
     hent_database_data,
     hent_fullt_register,
+    hent_posisjonsholdere,
     hent_siste_oppdatering,
     lagre_i_database,
     tving_ny_nedlasting,
@@ -79,6 +80,86 @@ def finn_nye_shortposisjoner(df: pd.DataFrame, terskel: float = 0.5) -> pd.DataF
 @st.cache_data(ttl=600, max_entries=4, show_spinner=False)
 def dataframe_to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
+
+
+def vis_posisjonsholdere(df: pd.DataFrame, key_prefix: str = "holders") -> None:
+    """Viser individuelle offentlige posisjonsholdere uten å påvirke aggregert historikk."""
+    st.subheader("Hvem shorter aksjene?")
+    st.caption(
+        "Individuelle offentlige shortposisjoner fra Finanstilsynets activePositions. "
+        "Disse holdes separat fra den aggregerte historikken for å unngå dobbelttelling."
+    )
+
+    if df is None or df.empty:
+        st.info("Ingen individuelle posisjonsholdere tilgjengelig akkurat nå.")
+        return
+
+    data = df.copy()
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["shortPercent"] = pd.to_numeric(data["shortPercent"], errors="coerce")
+    data["shares"] = pd.to_numeric(data.get("shares"), errors="coerce")
+    data = data.dropna(subset=["issuerName", "positionHolder", "date", "shortPercent"])
+
+    search = st.text_input(
+        "Søk etter selskap, ISIN eller posisjonsholder",
+        placeholder="F.eks. EQUINOR, NO0010096985 eller Marshall Wace",
+        key=f"{key_prefix}_search",
+    ).strip()
+
+    if search:
+        mask = (
+            data["issuerName"].fillna("").astype(str).str.contains(search, case=False, na=False, regex=False)
+            | data["isin"].fillna("").astype(str).str.contains(search, case=False, na=False, regex=False)
+            | data["positionHolder"].fillna("").astype(str).str.contains(search, case=False, na=False, regex=False)
+        )
+        data = data.loc[mask]
+
+    newest_only = st.toggle(
+        "Kun siste registrerte posisjon per selskap og posisjonsholder",
+        value=True,
+        key=f"{key_prefix}_latest",
+    )
+    if newest_only and not data.empty:
+        data = (
+            data.sort_values("date")
+            .groupby(["issuerName", "positionHolder"], as_index=False)
+            .tail(1)
+        )
+
+    data = data.sort_values(["date", "shortPercent"], ascending=[False, False])
+    view = data.rename(
+        columns={
+            "issuerName": "Selskap",
+            "positionHolder": "Posisjonsholder",
+            "shortPercent": "Short %",
+            "shares": "Aksjer",
+            "isin": "ISIN",
+        }
+    ).copy()
+    view["Dato"] = view["date"].dt.strftime("%d.%m.%Y")
+    view = view[["Selskap", "Posisjonsholder", "Dato", "Short %", "Aksjer", "ISIN"]]
+
+    st.dataframe(
+        view,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+            "Posisjonsholder": st.column_config.TextColumn("Posisjonsholder", width="large"),
+            "Dato": st.column_config.TextColumn("Dato", width="small"),
+            "Short %": st.column_config.NumberColumn("Short %", format="%.2f %%"),
+            "Aksjer": st.column_config.NumberColumn("Aksjer", format="%d"),
+            "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+        },
+    )
+
+    st.download_button(
+        "Last ned posisjonsholdere som CSV",
+        data=dataframe_to_csv(view),
+        file_name="short_posisjonsholdere.csv",
+        mime="text/csv",
+        key=f"{key_prefix}_download",
+    )
 
 
 def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
@@ -692,6 +773,7 @@ st.markdown(
 # Registeret ligger i en delt ressurs-cache. Ingen kopier lagres i brukernes session_state.
 with st.spinner("Laster delt datagrunnlag …"):
     df_live = hent_fullt_register()
+    df_holders = hent_posisjonsholdere()
 
 # SQLite-data leses også fra en delt cache og blir ikke lagret per bruker.
 df_db = hent_database_data()
@@ -705,6 +787,9 @@ with tab_live:
 
     with title_col:
         st.header("Live markedsoversikt")
+        st.info(
+            "Navnene på hvem som innehar en aktiv shortposisjon på de ulike selskapene, finner man nederst på nettsiden her."
+        )
 
     with refresh_col:
         if st.button(
@@ -905,6 +990,9 @@ with tab_live:
         vis_hurtiginnsikt(df_live, expanded=True)
         st.subheader("Søk og filtrering")
         vis_sok_og_graf(df_live, "live")
+
+        st.divider()
+        vis_posisjonsholdere(df_holders, "live_holders")
 
     st.divider()
     st.subheader("Status for SQLite-registeret")

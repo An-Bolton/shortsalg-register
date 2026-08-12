@@ -103,37 +103,120 @@ def _normaliser_payload(data):
     return df
 
 
+def _normaliser_posisjonsholdere(data):
+    """
+    Lager ett separat datasett med individuelle offentlige shortposisjoner.
+    Leser event["activePositions"] og holder dette adskilt fra de aggregerte
+    event-radene, slik at eksisterende grafer og summer ikke dobbeltteller.
+    """
+    rows = []
+    columns = ["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"]
+
+    if not isinstance(data, list):
+        return pd.DataFrame(columns=columns)
+
+    for instrument in data:
+        if not isinstance(instrument, dict):
+            continue
+
+        isin = _get_first(instrument, ["isin", "instrumentIsin"])
+        issuer = _get_first(instrument, ["issuerName", "issuer", "instrumentName"])
+        events = instrument.get("events", [])
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+
+            event_date = _to_iso_date(_get_first(event, ["date", "positionDate", "disclosureDate"]))
+            active_positions = event.get("activePositions", [])
+            if not isinstance(active_positions, list):
+                continue
+
+            for position in active_positions:
+                if not isinstance(position, dict):
+                    continue
+
+                holder = _get_first(
+                    position,
+                    ["positionHolder", "positionHolderName", "holderName", "positionOwner", "ownerName", "holder"],
+                )
+                row = {
+                    "isin": isin or _get_first(position, ["isin", "instrumentIsin"]),
+                    "issuerName": issuer or _get_first(position, ["issuerName", "issuer"]),
+                    "positionHolder": holder,
+                    "date": _to_iso_date(
+                        _get_first(position, ["date", "positionDate", "disclosureDate"], default=event_date)
+                    ),
+                    "shortPercent": _standardiser_shortpercent(
+                        _get_first(position, ["shortPercent", "netShortPosition", "positionPercent", "percent"])
+                    ),
+                    "shares": _get_first(position, ["shares", "shortPosition", "position", "numberOfShares"]),
+                }
+
+                if row["issuerName"] and row["positionHolder"] and row["date"] and row["shortPercent"] is not None:
+                    rows.append(row)
+
+    df = pd.DataFrame(rows, columns=columns)
+    if not df.empty:
+        df["shortPercent"] = pd.to_numeric(df["shortPercent"], errors="coerce")
+        df["shares"] = pd.to_numeric(df["shares"], errors="coerce")
+        df = df.dropna(subset=["issuerName", "positionHolder", "date", "shortPercent"])
+        df = df.drop_duplicates().reset_index(drop=True)
+    return df
+
+
 @st.cache_data(ttl=3600, max_entries=1, show_spinner=False)
-def hent_fullt_register(max_retries=3):
-    """
-    Henter og normaliserer hele registeret én gang per time, delt mellom alle brukere.
-    DataFrame-en skal behandles som skrivebeskyttet i appen.
-    """
+def _hent_api_payload(max_retries=3):
+    """Henter rå JSON én gang per time og deler samme payload mellom datasett."""
     last_error = None
     for attempt in range(max_retries):
         try:
             response = requests.get(
                 API_URL,
                 timeout=(15, 120),
-                headers={"User-Agent": "shortsalg-register/2.0"},
+                headers={"User-Agent": "shortsalg-register/2.1"},
             )
             response.raise_for_status()
-            df = _normaliser_payload(response.json())
-            if df.empty:
-                raise ValueError("API-et svarte, men parseren fant ingen gyldige rader.")
-            return df
+            data = response.json()
+            if not isinstance(data, list) or not data:
+                raise ValueError("API-et svarte, men payloaden var tom eller ugyldig.")
+            return data
         except Exception as exc:
             last_error = exc
             if attempt < max_retries - 1:
                 time.sleep(2 + attempt)
 
     print(f"Klarte ikke hente data fra Finanstilsynet: {last_error}")
-    return pd.DataFrame(columns=["isin", "issuerName", "positionHolder", "date", "shortPercent", "shares"])
+    return []
+
+
+@st.cache_data(ttl=3600, max_entries=1, show_spinner=False)
+def hent_fullt_register(max_retries=3):
+    """Returnerer kun aggregerte event-rader for eksisterende analyser og grafer."""
+    data = _hent_api_payload(max_retries=max_retries)
+    df = _normaliser_payload(data)
+    if df.empty:
+        print("API-et svarte, men parseren fant ingen gyldige aggregerte rader.")
+    return df
+
+
+@st.cache_data(ttl=3600, max_entries=1, show_spinner=False)
+def hent_posisjonsholdere(max_retries=3):
+    """Returnerer individuelle offentlige shortposisjoner fra activePositions."""
+    data = _hent_api_payload(max_retries=max_retries)
+    df = _normaliser_posisjonsholdere(data)
+    if df.empty:
+        print("Ingen individuelle posisjonsholdere ble funnet i activePositions.")
+    return df
 
 
 def tving_ny_nedlasting():
-    """Tømmer den delte API-cachen. Neste kall laster data på nytt."""
+    """Tømmer delte API-cacher. Neste kall laster data på nytt."""
+    _hent_api_payload.clear()
     hent_fullt_register.clear()
+    hent_posisjonsholdere.clear()
 
 
 def _connect(db_path=DB_PATH):
