@@ -788,7 +788,7 @@ with tab_live:
     with title_col:
         st.header("Live markedsoversikt")
         st.info(
-            "Navnene på hvem som innehar en aktiv shortposisjon på de ulike selskapene, finner man nederst på nettsiden her."
+            "Navn på hvem som innehar en aktiv shortposisjon på de ulike selskapene finner man nederst på nettsiden her."
         )
 
     with refresh_col:
