@@ -758,7 +758,7 @@ st.markdown(
         <p class="hero-copy">
             Dette er et analyseverktøy for offentlig rapporterte shortposisjoner i norske børsnoterte selskaper som jeg lagde ved University of Oxford - Säid Business School (i ettertid har jeg bare lagt på et enkelt design).
             Her kan man følge utviklingen, oppdage nye posisjoner og analyser av markedets mest shortede aksjer. Finanstilsynet gjør en oppdatering hver handelsdag kl. 15:30 CET. Kilde: https://ssr.finanstilsynet.no/api/v2/
-        </p>
+        </p> <p>Registeret oppdateres automatisk fra Finanstilsynet. Ved å dele én felles datakilde mellom alle besøkende blir plattformen både raskere og mer stabil. </p>
         <div class="hero-badges">
             <span class="hero-badge"> Live Finanstilsynet-data</span>
             <span class="hero-badge"> Interaktive analyser</span>
@@ -802,9 +802,6 @@ with tab_live:
             tving_ny_nedlasting()
             st.rerun()
 
-    st.info(
-        "Registeret oppdateres automatisk fra Finanstilsynet. Ved å dele én felles datakilde mellom alle besøkende blir plattformen både raskere og mer stabil."
-    )
 
     if st.session_state.pop("show_refresh_success", False):
         st.success("Registeret er oppdatert med de nyeste dataene fra Finanstilsynet.")
