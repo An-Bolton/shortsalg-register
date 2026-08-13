@@ -729,6 +729,45 @@ st.markdown(
         letter-spacing: -0.025em;
     }
 
+    .section-head {
+        position: relative;
+        overflow: hidden;
+        padding: 22px 24px;
+        margin: 4px 0 18px 0;
+        border-radius: 20px;
+        border: 1px solid rgba(79, 124, 255, 0.16);
+        background:
+            radial-gradient(circle at 92% 15%, rgba(79, 124, 255, 0.13), transparent 32%),
+            linear-gradient(135deg, rgba(255,255,255,.98), rgba(246,249,255,.96));
+        box-shadow: 0 12px 34px rgba(15,23,42,.08);
+    }
+
+    .section-head-kicker {
+        color: #315cff;
+        font-size: 0.72rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.13em;
+        margin-bottom: 7px;
+    }
+
+    .section-head-title {
+        color: #0f172a;
+        font-size: clamp(1.8rem, 3vw, 2.65rem);
+        line-height: 1.05;
+        font-weight: 950;
+        letter-spacing: -0.04em;
+        margin: 0;
+    }
+
+    .section-head-copy {
+        color: #64748b;
+        font-size: 0.93rem;
+        line-height: 1.55;
+        margin-top: 9px;
+        max-width: 850px;
+    }
+
     p, label, .stCaption, [data-testid="stCaptionContainer"] {
         color: #475569;
     }
@@ -786,9 +825,17 @@ with tab_live:
     title_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
 
     with title_col:
-        st.header("Live markedsoversikt")
-        st.info(
-            "Navn på hvem som innehar en aktiv shortposisjon på de ulike selskapene finner man nederst på nettsiden her."
+        st.markdown(
+            """
+            <div class="section-head">
+                <div class="section-head-kicker">LIVE · FINANSTILSYNET</div>
+                <div class="section-head-title">Live markedsoversikt</div>
+                <div class="section-head-copy">
+                    Følg gjeldende shortnivåer, endringer og aktive posisjonsholdere i ett samlet markedspanel.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     with refresh_col:
@@ -849,29 +896,67 @@ with tab_live:
             delta_color="off",
         )
 
-        # Tre raske markedssignaler. Kortene viser detaljene direkte og har
-        # i tillegg et hover-felt via HTML-attributtet title.
+        # Gjør individuelle aktive posisjonsholdere lett tilgjengelige høyt på siden.
+        st.divider()
+        vis_posisjonsholdere(df_holders, "live_holders")
+        st.divider()
+
+        # Tre raske markedssignaler. Vi viser største reduksjon og økning
+        # separat for å unngå å gjenta "største gjeldende shortandel" fra KPI-kortene.
         changes = beregn_storste_endringer(live_data)
+
         if changes.empty:
+            decrease_value = "Ingen endring"
+            decrease_company = "Ingen tilgjengelige data"
+            decrease_detail = "Kan beregnes når minst to observasjoner finnes."
+
             increase_value = "Ingen endring"
             increase_company = "Ingen tilgjengelige data"
             increase_detail = "Kan beregnes når minst to observasjoner finnes."
         else:
-            increase_row = changes.sort_values("endring", ascending=False).iloc[0]
-            increase_value = f"{float(increase_row['endring']):+.2f} pp"
-            increase_company = str(increase_row.get("issuerName") or "Ukjent selskap")
-            increase_from = float(increase_row.get("forrige_short", 0.0))
-            increase_to = float(increase_row.get("shortPercent", 0.0))
-            increase_date = pd.to_datetime(increase_row.get("date"), errors="coerce")
-            increase_date_text = (
-                increase_date.strftime("%d.%m.%Y")
-                if pd.notna(increase_date)
-                else "ukjent dato"
-            )
-            increase_detail = (
-                f"Fra {increase_from:.2f} % til {increase_to:.2f} % · "
-                f"{increase_date_text}"
-            )
+            decreases = changes.loc[changes["endring"] < 0].copy()
+            if decreases.empty:
+                decrease_value = "Ingen reduksjon"
+                decrease_company = "Ingen tilgjengelige data"
+                decrease_detail = "Ingen siste reduksjoner funnet i datasettet."
+            else:
+                decrease_row = decreases.sort_values("endring", ascending=True).iloc[0]
+                decrease_value = f"{float(decrease_row['endring']):+.2f} pp"
+                decrease_company = str(decrease_row.get("issuerName") or "Ukjent selskap")
+                decrease_from = float(decrease_row.get("forrige_short", 0.0))
+                decrease_to = float(decrease_row.get("shortPercent", 0.0))
+                decrease_date = pd.to_datetime(decrease_row.get("date"), errors="coerce")
+                decrease_date_text = (
+                    decrease_date.strftime("%d.%m.%Y")
+                    if pd.notna(decrease_date)
+                    else "ukjent dato"
+                )
+                decrease_detail = (
+                    f"Fra {decrease_from:.2f} % til {decrease_to:.2f} % · "
+                    f"{decrease_date_text}"
+                )
+
+            increases = changes.loc[changes["endring"] > 0].copy()
+            if increases.empty:
+                increase_value = "Ingen økning"
+                increase_company = "Ingen tilgjengelige data"
+                increase_detail = "Ingen siste økninger funnet i datasettet."
+            else:
+                increase_row = increases.sort_values("endring", ascending=False).iloc[0]
+                increase_value = f"{float(increase_row['endring']):+.2f} pp"
+                increase_company = str(increase_row.get("issuerName") or "Ukjent selskap")
+                increase_from = float(increase_row.get("forrige_short", 0.0))
+                increase_to = float(increase_row.get("shortPercent", 0.0))
+                increase_date = pd.to_datetime(increase_row.get("date"), errors="coerce")
+                increase_date_text = (
+                    increase_date.strftime("%d.%m.%Y")
+                    if pd.notna(increase_date)
+                    else "ukjent dato"
+                )
+                increase_detail = (
+                    f"Fra {increase_from:.2f} % til {increase_to:.2f} % · "
+                    f"{increase_date_text}"
+                )
 
         new_positions = finn_nye_shortposisjoner(live_data)
         if new_positions.empty:
@@ -895,13 +980,12 @@ with tab_live:
 
         st.markdown("### Markedssignaler")
         st.info(
-            "Her vises gjeldende aggregerte shortandel, største siste endring og nyeste posisjon over 0,5 %. Tallene bygger på siste registrerte nivå per selskap."
+            "Her vises største siste reduksjon, største siste økning og nyeste posisjon over 0,5 %. Tallene bygger på siste registrerte nivå per selskap."
         )
         signal_col1, signal_col2, signal_col3 = st.columns(3)
 
-        largest_title = html.escape(
-            f"{max_short_holder} → {max_short_company} → "
-            f"{max_short:.2f} % → Registrert {max_short_date}"
+        decrease_title = html.escape(
+            f"{decrease_company} → {decrease_value} → {decrease_detail}"
         )
         increase_title = html.escape(
             f"{increase_company} → {increase_value} → {increase_detail}"
@@ -913,14 +997,11 @@ with tab_live:
         with signal_col1:
             st.markdown(
                 f"""
-                <div class="insight-card" title="{largest_title}">
-                    <div class="insight-kicker"> Største gjeldende shortandel</div>
-                    <div class="insight-value">{max_short:.2f} %</div>
-                    <div class="insight-company">{html.escape(max_short_company)}</div>
-                    <div class="insight-detail">
-                        {html.escape(max_short_holder)}<br>
-                        Registrert {html.escape(max_short_date)}
-                    </div>
+                <div class="insight-card" title="{decrease_title}">
+                    <div class="insight-kicker"> Største siste reduksjon</div>
+                    <div class="insight-value">{html.escape(decrease_value)}</div>
+                    <div class="insight-company">{html.escape(decrease_company)}</div>
+                    <div class="insight-detail">{html.escape(decrease_detail)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -987,9 +1068,6 @@ with tab_live:
         vis_hurtiginnsikt(df_live, expanded=True)
         st.subheader("Søk og filtrering")
         vis_sok_og_graf(df_live, "live")
-
-        st.divider()
-        vis_posisjonsholdere(df_holders, "live_holders")
 
     st.divider()
     st.subheader("Status for SQLite-registeret")
