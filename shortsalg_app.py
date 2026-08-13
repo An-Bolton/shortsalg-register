@@ -828,7 +828,7 @@ with tab_live:
         st.markdown(
             """
             <div class="section-head">
-                <div class="section-head-kicker">Trykk på knappen "Oppdater fra Finanstilsynet" for å se de nyeste posisjonen</div>
+                <div class="section-head-kicker">Trykk på knappen "Oppdater fra Finanstilsynet" for å se de nyeste posisjonene</div>
                 <div class="section-head-title">Live markedsoversikt</div>
                 <div class="section-head-copy">
                     ---
