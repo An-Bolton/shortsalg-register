@@ -86,7 +86,7 @@ def vis_posisjonsholdere(df: pd.DataFrame, key_prefix: str = "holders") -> None:
     """Viser individuelle offentlige posisjonsholdere uten å påvirke aggregert historikk."""
     st.subheader("Hvem shorter aksjene?")
     st.caption(
-        "Individuelle offentlige shortposisjoner fra Finanstilsynets activePositions. "
+        "Dette er individuelle offentlige shortposisjoner fra Finanstilsynets activePositions. "
         "Disse holdes separat fra den aggregerte historikken for å unngå dobbelttelling."
     )
 
@@ -828,10 +828,10 @@ with tab_live:
         st.markdown(
             """
             <div class="section-head">
-                <div class="section-head-kicker">LIVE · FINANSTILSYNET</div>
+                <div class="section-head-kicker">Trykk på knappen "Oppdater fra Finanstilsynet" for å se de nyeste posisjonen</div>
                 <div class="section-head-title">Live markedsoversikt</div>
                 <div class="section-head-copy">
-                    Følg gjeldende shortnivåer, endringer og aktive posisjonsholdere i ett samlet markedspanel.
+                    ---
                 </div>
             </div>
             """,
