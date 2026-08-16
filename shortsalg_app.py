@@ -1188,8 +1188,7 @@ with tab_about:
     st.header("Om plattformen")
     st.markdown(
         """
-        Shortsalg-registeret er en uavhengig og uoffisiell analysetjeneste. Tjenesten er ikke utviklet, godkjent eller drevet av Finanstilsynet. Data hentes fra Finanstilsynets offentlige Short Sale Register (SSR)
-        ,og det var dette utgangspunktet som jeg bygget shortsregisteret videre på ved Universitetet i Oxford - Saïd Business School som en del av et innleveringsprosjekt. Den er utviklet for læring, markedsinnsikt og enklere tilgang til
+        Shortsalg-registeret er en uavhengig og uoffisiell analysetjeneste. Tjenesten er ikke utviklet, godkjent eller drevet av Finanstilsynet. Data hentes fra Finanstilsynets offentlige Short Sale Register (SSR), og det var dette utgangspunktet som jeg bygget shortsregisteret videre på ved Universitetet i Oxford - Saïd Business School som en del av et innleveringsprosjekt. Den er utviklet for læring, markedsinnsikt og enklere tilgang til
         historiske data.
 
         **Teknologi:** Python, Streamlit, Pandas, Plotly og SQLite. API fra Finanstilsynet: https://ssr.finanstilsynet.no/api/v2/
