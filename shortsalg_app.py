@@ -929,7 +929,7 @@ with tab_live:
             delta_color="off",
         )
 
-        with st.expander("OPPDATERING: Hvor er f.eks. Frontline og andre manglende selskapene som ikke finnes i listen?", expanded=False):
+        with st.expander("OPPDATERING: Hvor er f.eks. Frontline og de andre selskapene som mangler og ikke finnes i listen?", expanded=False):
             st.markdown(
                 " Jo, f.eks. selskapet Frontline mangler ikke på grunn av en feil i appen. Finanstilsynet "
                 "har unntatt enkelte aksjer fra SSR-rapportering. I tillegg viser API-et "
