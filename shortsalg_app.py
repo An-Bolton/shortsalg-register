@@ -931,7 +931,7 @@ with tab_live:
 
         with st.expander("OPPDATERING: Hvor er f.eks. Frontline og andre manglende selskapene som ikke finnes i listen?", expanded=False):
             st.markdown(
-                "** Jo, f.eks. selskapet Frontline mangler ikke på grunn av en feil i appen.** Finanstilsynet "
+                " Jo, f.eks. selskapet Frontline mangler ikke på grunn av en feil i appen. Finanstilsynet "
                 "har unntatt enkelte aksjer fra SSR-rapportering. I tillegg viser API-et "
                 "bare offentlig rapporterbare nettoposisjoner på minst 0,5 %, ikke en "
                 "komplett liste over alle selskaper på Oslo Børs."
