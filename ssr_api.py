@@ -1,5 +1,7 @@
 import datetime
+import html
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -10,8 +12,30 @@ import requests
 import streamlit as st
 
 API_URL = "https://ssr.finanstilsynet.no/api/v2/instruments/export-json"
+SSR_HOME_URL = "https://ssr.finanstilsynet.no/"
 DB_PATH = os.environ.get("SHORTSALG_DB_PATH", "shortsalg.db")
 _DB_LOCK = threading.RLock()
+
+_EXEMPT_FALLBACK = [
+    {
+        "issuerName": "Frontline PLC",
+        "isin": "CY0200352116",
+        "status": "Unntatt SSR-rapportering",
+        "effectiveFrom": "2025-03-31",
+    },
+    {
+        "issuerName": "Golden Ocean Group",
+        "isin": "BMG396372051",
+        "status": "Unntatt SSR-rapportering",
+        "effectiveFrom": "2025-03-31",
+    },
+    {
+        "issuerName": "Clean Seas Seafood Limited",
+        "isin": "AU000000CSS3",
+        "status": "Unntatt SSR-rapportering",
+        "effectiveFrom": "2025-03-31",
+    },
+]
 
 
 def _to_iso_date(value):
@@ -46,6 +70,65 @@ def _get_first(data, candidates, default=None):
         if candidate.lower() in lower_map:
             return lower_map[candidate.lower()]
     return default
+
+
+def _normaliser_unntatte_instrumenter(page_text):
+    """Leser Finanstilsynets publiserte liste over aksjer unntatt SSR-rapportering."""
+    columns = ["issuerName", "isin", "status", "effectiveFrom"]
+    if not page_text:
+        return pd.DataFrame(_EXEMPT_FALLBACK, columns=columns)
+
+    section = re.search(
+        r"Exempted shares from\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4}).*?<p>(.*?)</p>",
+        page_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not section:
+        return pd.DataFrame(_EXEMPT_FALLBACK, columns=columns)
+
+    day, month_name, year, body = section.groups()
+    month_lookup = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    month = month_lookup.get(month_name.lower())
+    effective_from = (
+        f"{int(year):04d}-{month:02d}-{int(day):02d}" if month else "2025-03-31"
+    )
+
+    clean_body = html.unescape(re.sub(r"<[^>]+>", " ", body))
+    clean_body = re.sub(r"\s+", " ", clean_body).strip()
+    if ":" in clean_body:
+        clean_body = clean_body.split(":", 1)[1]
+
+    rows = []
+    for issuer, isin in re.findall(
+        r"([^,]+?)\s*\(([A-Z]{2}[A-Z0-9]{10})\)", clean_body
+    ):
+        issuer = re.sub(r"^\s*(?:and\s+)?", "", issuer, flags=re.IGNORECASE).strip(" .")
+        if issuer:
+            rows.append(
+                {
+                    "issuerName": issuer,
+                    "isin": isin,
+                    "status": "Unntatt SSR-rapportering",
+                    "effectiveFrom": effective_from,
+                }
+            )
+
+    return pd.DataFrame(rows or _EXEMPT_FALLBACK, columns=columns).drop_duplicates(
+        subset=["isin"]
+    )
 
 
 def _normaliser_payload(data):
@@ -212,11 +295,33 @@ def hent_posisjonsholdere(max_retries=3):
     return df
 
 
+@st.cache_data(ttl=3600, max_entries=1, show_spinner=False)
+def hent_unntatte_instrumenter(max_retries=3):
+    """Henter aksjer som Finanstilsynet uttrykkelig har unntatt SSR-rapportering."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(
+                SSR_HOME_URL,
+                timeout=(10, 30),
+                headers={"User-Agent": "shortsalg-register/2.2"},
+            )
+            response.raise_for_status()
+            return _normaliser_unntatte_instrumenter(response.text)
+        except Exception as exc:
+            if attempt < max_retries - 1:
+                time.sleep(1 + attempt)
+            else:
+                print(f"Klarte ikke hente SSR-unntakslisten: {exc}")
+
+    return pd.DataFrame(_EXEMPT_FALLBACK)
+
+
 def tving_ny_nedlasting():
     """Tømmer delte API-cacher. Neste kall laster data på nytt."""
     _hent_api_payload.clear()
     hent_fullt_register.clear()
     hent_posisjonsholdere.clear()
+    hent_unntatte_instrumenter.clear()
 
 
 def _connect(db_path=DB_PATH):

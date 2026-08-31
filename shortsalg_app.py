@@ -8,6 +8,7 @@ from ssr_api import (
     hent_fullt_register,
     hent_posisjonsholdere,
     hent_siste_oppdatering,
+    hent_unntatte_instrumenter,
     lagre_i_database,
     tving_ny_nedlasting,
 )
@@ -262,7 +263,11 @@ def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
                 )
 
 
-def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
+def vis_sok_og_graf(
+    df: pd.DataFrame,
+    key_prefix: str,
+    exempted: pd.DataFrame | None = None,
+) -> None:
     if df.empty:
         st.info("Ingen data tilgjengelig.")
         return
@@ -290,6 +295,33 @@ def vis_sok_og_graf(df: pd.DataFrame, key_prefix: str) -> None:
             .str.contains(search, case=False, na=False, regex=False)
         )
         filtered = filtered.loc[issuer_mask | isin_mask]
+
+    if search and filtered.empty:
+        exempt_match = pd.DataFrame()
+        if exempted is not None and not exempted.empty:
+            exempt_mask = (
+                exempted["issuerName"].fillna("").astype(str).str.contains(
+                    search, case=False, na=False, regex=False
+                )
+                | exempted["isin"].fillna("").astype(str).str.contains(
+                    search, case=False, na=False, regex=False
+                )
+            )
+            exempt_match = exempted.loc[exempt_mask].copy()
+
+        if not exempt_match.empty:
+            names = ", ".join(exempt_match["issuerName"].astype(str).tolist())
+            st.warning(
+                f"{names} finnes ikke i shortdataene fordi aksjen er unntatt "
+                "SSR-rapportering. Manglende tall betyr derfor ikke 0 % short."
+            )
+        else:
+            st.info(
+                "Ingen offentlig rapporterbar shortposisjon ble funnet. Registeret er "
+                "ikke en komplett selskapsliste for Oslo Børs: posisjoner under 0,5 % "
+                "er ikke med, og fravær skal ikke tolkes som 0 % short."
+            )
+        return
 
     issuers = sorted(filtered["issuerName"].dropna().astype(str).unique().tolist())
     selected = st.multiselect(
@@ -813,6 +845,7 @@ st.markdown(
 with st.spinner("Laster delt datagrunnlag …"):
     df_live = hent_fullt_register()
     df_holders = hent_posisjonsholdere()
+    df_exempt = hent_unntatte_instrumenter()
 
 # SQLite-data leses også fra en delt cache og blir ikke lagret per bruker.
 df_db = hent_database_data()
@@ -895,6 +928,36 @@ with tab_live:
             delta=max_short_company,
             delta_color="off",
         )
+
+        with st.expander("OPPDATERING: Hvor er f.eks. Frontline og andre manglende selskapene som ikke finnes i listen?", expanded=False):
+            st.markdown(
+                "** Jo, f.eks. selskapet Frontline mangler ikke på grunn av en feil i appen.** Finanstilsynet "
+                "har unntatt enkelte aksjer fra SSR-rapportering. I tillegg viser API-et "
+                "bare offentlig rapporterbare nettoposisjoner på minst 0,5 %, ikke en "
+                "komplett liste over alle selskaper på Oslo Børs."
+            )
+            if df_exempt is not None and not df_exempt.empty:
+                exempt_view = df_exempt.rename(
+                    columns={
+                        "issuerName": "Selskap",
+                        "isin": "ISIN",
+                        "status": "Status",
+                        "effectiveFrom": "Unntatt fra",
+                    }
+                ).copy()
+                exempt_view["Unntatt fra"] = pd.to_datetime(
+                    exempt_view["Unntatt fra"], errors="coerce"
+                ).dt.strftime("%d.%m.%Y")
+                st.dataframe(
+                    exempt_view[["Selskap", "ISIN", "Status", "Unntatt fra"]],
+                    width="stretch",
+                    hide_index=True,
+                )
+            st.caption(
+                "Manglende selskap eller tall betyr ikke automatisk 0 % short. "
+                "Det betyr bare at Finanstilsynets offentlige SSR-kilde ikke har en "
+                "rapporterbar observasjon å vise."
+            )
 
         # Gjør individuelle aktive posisjonsholdere lett tilgjengelige høyt på siden.
         st.divider()
@@ -1067,7 +1130,7 @@ with tab_live:
 
         vis_hurtiginnsikt(df_live, expanded=True)
         st.subheader("Søk og filtrering")
-        vis_sok_og_graf(df_live, "live")
+        vis_sok_og_graf(df_live, "live", df_exempt)
 
     st.divider()
     st.subheader("Status for SQLite-registeret")
@@ -1084,7 +1147,7 @@ with tab_db:
     else:
         st.success(f"Databasen inneholder {len(df_db):,} rader.")
         vis_hurtiginnsikt(df_db)
-        vis_sok_og_graf(df_db, "db")
+        vis_sok_og_graf(df_db, "db", df_exempt)
 
 
 with tab_top10:
