@@ -2068,7 +2068,7 @@ with tab_top10:
 
 with tab_about:
     _render_section_header(
-        "Plattform · metode",
+        "Plattform · metode (alle høgskoler og universiteter er opptatt av metode...)",
         "Om Shortregister",
         "Dette her er et uavhengig analyseverktøy som gjør offentlige SSR-data enklere å utforske – med tydelige forbehold om hva tallene faktisk viser.",
     )
