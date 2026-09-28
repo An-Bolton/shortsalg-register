@@ -138,18 +138,24 @@ def vis_posisjonsholdere(df: pd.DataFrame, key_prefix: str = "holders") -> None:
         }
     ).copy()
     view["Dato"] = view["date"].dt.strftime("%d.%m.%Y")
-    view = view[["Selskap", "Posisjonsholder", "Dato", "Short %", "Aksjer", "ISIN"]]
+    # Legg de viktigste kolonnene først. På smale skjermer er dermed
+    # shortandelen synlig før de brede detaljkolonnene.
+    view = view[["Selskap", "Short %", "Posisjonsholder", "Dato", "Aksjer", "ISIN"]]
 
     st.dataframe(
         view,
         width="stretch",
         hide_index=True,
         column_config={
-            "Selskap": st.column_config.TextColumn("Selskap", width="large"),
-            "Posisjonsholder": st.column_config.TextColumn("Posisjonsholder", width="large"),
+            "Selskap": st.column_config.TextColumn("Selskap", width="medium"),
+            "Posisjonsholder": st.column_config.TextColumn("Posisjonsholder", width="medium"),
             "Dato": st.column_config.TextColumn("Dato", width="small"),
-            "Short %": st.column_config.NumberColumn("Short %", format="%.2f %%"),
-            "Aksjer": st.column_config.NumberColumn("Aksjer", format="%d"),
+            "Short %": st.column_config.NumberColumn(
+                "Short %", format="%.2f %%", width="small"
+            ),
+            "Aksjer": st.column_config.NumberColumn(
+                "Aksjer", format="%d", width="small"
+            ),
             "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
         },
     )
@@ -397,8 +403,10 @@ def vis_sok_og_graf(
     else:
         shown["Aksjer"] = pd.NA
 
-    base_columns = ["Selskap", "Dato", "Short %", "Endring (pp)", "Trend"]
-    advanced_columns = ["ISIN", "Posisjonsholder", "Aksjer"]
+    # Standardvisningen er bevisst kompakt nok for mobil. Trend viser samme
+    # retning som Endring (pp), og ligger derfor under avanserte kolonner.
+    base_columns = ["Selskap", "Short %", "Endring (pp)", "Dato"]
+    advanced_columns = ["Trend", "ISIN", "Posisjonsholder", "Aksjer"]
     display_columns = base_columns + advanced_columns if advanced else base_columns
     table_view = shown[display_columns].head(max_rows)
 
@@ -419,14 +427,20 @@ def vis_sok_og_graf(
         )
 
     column_config = {
-        "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+        "Selskap": st.column_config.TextColumn("Selskap", width="medium"),
         "Dato": st.column_config.TextColumn("Dato", width="small"),
-        "Short %": st.column_config.NumberColumn("Short %", format="%.2f %%"),
-        "Endring (pp)": st.column_config.NumberColumn("Endring (pp)", format="%+.2f"),
+        "Short %": st.column_config.NumberColumn(
+            "Short %", format="%.2f %%", width="small"
+        ),
+        "Endring (pp)": st.column_config.NumberColumn(
+            "Endring", format="%+.2f", width="small"
+        ),
         "Trend": st.column_config.TextColumn("Trend", width="small"),
         "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
         "Posisjonsholder": st.column_config.TextColumn("Posisjonsholder", width="medium"),
-        "Aksjer": st.column_config.NumberColumn("Aksjer", format="%d"),
+        "Aksjer": st.column_config.NumberColumn(
+            "Aksjer", format="%d", width="small"
+        ),
     }
 
     st.dataframe(
@@ -554,6 +568,10 @@ st.markdown(
 
     html, body, [class*="css"], [data-testid="stAppViewContainer"] {
         font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    *, *::before, *::after {
+        box-sizing: border-box;
     }
 
     .stApp {
@@ -1570,24 +1588,112 @@ st.markdown(
     }
 
     @media (max-width: 760px) {
-        .hero { padding: 23px 20px 18px; border-radius: 12px; }
-        .brand-lockup { margin-bottom: 24px; }
-        .hero .hero-title { font-size: 2.2rem; }
-        .hero-lead { font-size: 1.08rem; }
-        .hero-foot {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 7px;
+        section.main > div.block-container,
+        .block-container {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            padding-bottom: 2.5rem !important;
         }
+
+        /* Streamlit-kolonner blir én tydelig vertikal mobilflyt. */
         [data-testid="stHorizontalBlock"] {
-            flex-wrap: wrap;
+            width: 100% !important;
+            flex-direction: column !important;
+            flex-wrap: nowrap !important;
             gap: 0.75rem !important;
         }
-        [data-testid="column"], [data-testid="stColumn"] {
-            min-width: 100% !important;
+
+        [data-testid="column"],
+        [data-testid="stColumn"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
             flex: 1 1 100% !important;
         }
-        .stTabs [data-baseweb="tab"] { padding: 0 10px !important; }
+
+        .hero-grid,
+        .about-grid {
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 1rem !important;
+        }
+
+        .hero,
+        .terminal-card,
+        .section-head,
+        .insight-card,
+        .about-card,
+        .method-note {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+        }
+
+        .hero {
+            padding: 23px 18px 18px;
+            border-radius: 12px;
+        }
+
+        .brand-lockup { margin-bottom: 24px; }
+
+        .hero .hero-title {
+            font-size: clamp(2.2rem, 11vw, 3rem) !important;
+            overflow-wrap: anywhere;
+        }
+
+        .hero-lead { font-size: 1.08rem; }
+
+        .hero-foot,
+        .terminal-meta,
+        .freshness-bar {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 0.45rem !important;
+        }
+
+        .insight-card,
+        .about-card {
+            min-height: 0 !important;
+            padding: 18px !important;
+        }
+
+        .insight-company,
+        .insight-detail,
+        .section-head-copy,
+        .pipeline-step span {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        [data-testid="stDataFrame"],
+        [data-testid="stPlotlyChart"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+        }
+
+        [data-testid="stPlotlyChart"] {
+            padding: 6px !important;
+        }
+
+        /* Fanene kan sveipes vannrett i stedet for å presse siden bredere. */
+        .stTabs [data-baseweb="tab-list"] {
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            flex-wrap: nowrap;
+            scrollbar-width: none;
+        }
+
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+            display: none;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            flex: 0 0 auto;
+            padding: 0 10px !important;
+        }
     }
     </style>
 
@@ -1928,8 +2034,8 @@ with tab_live:
 with tab_db:
     _render_section_header(
         "Historikk · selskapssøk",
-        "Finn selskapet. Se utviklingen.",
-        "Søk på selskapsnavn eller ISIN, filtrer historikken og eksporter akkurat det utsnittet du trenger.",
+        "Finn selskapet og se utviklingen.",
+        "Her kan du søke på selskapsnavn eller ISIN, filtrer historikken og eksporter akkurat det utsnittet du trenger.",
     )
     if df_db.empty:
         st.info("SQLite-databasen er tom. Lagre live-registeret først.")
