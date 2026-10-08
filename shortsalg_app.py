@@ -20,9 +20,14 @@ def _standardiser_shortpercent(df: pd.DataFrame) -> pd.DataFrame:
         return df
     out = df.copy()
     out["shortPercent"] = pd.to_numeric(out["shortPercent"], errors="coerce")
-    maximum = out["shortPercent"].max(skipna=True)
-    if pd.notna(maximum) and maximum > 20:
-        out["shortPercent"] = out["shortPercent"] / 100
+    # Eldre SQLite-rader kan ligge i hundredels prosent (f.eks. 792 = 7,92 %),
+    # mens nyere API-rader allerede er normalisert (7,92). Normaliser derfor
+    # rad for rad. En global sjekk på maksimum delte tidligere også korrekte
+    # rader på 100 når de to formatene forekom i samme datasett.
+    raw_scale = out["shortPercent"] > 20
+    out.loc[raw_scale, "shortPercent"] = (
+        out.loc[raw_scale, "shortPercent"] / 100
+    )
     return out
 
 
@@ -30,13 +35,84 @@ def _agg_issuer_date(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
     out = _standardiser_shortpercent(df)
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["date"] = (
+        pd.to_datetime(out["date"], errors="coerce", utc=True)
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
     out = out.dropna(subset=["issuerName", "date", "shortPercent"])
+    out = out.loc[out["shortPercent"].between(0, 100)].copy()
     return (
         out.groupby(["issuerName", "date"], as_index=False)["shortPercent"]
-        .sum()
+        # API-et inneholder allerede aggregert shortandel per instrument og
+        # endringsdato. DB + live kan inneholde samme observasjon i ulik skala;
+        # max hindrer at slike overlapp blir summert og dermed dobbelttelt.
+        .max()
         .sort_values(["issuerName", "date"])
     )
+
+
+def bygg_daglig_shortserie(
+    df: pd.DataFrame,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+) -> pd.DataFrame:
+    """Bygger en daglig, fremoverfylt serie av rapporterte shortnivåer.
+
+    SSR-historikken er hendelsesbasert: en rad publiseres når nivået endres.
+    For et tidsvektet gjennomsnitt må siste kjente nivå derfor gjelde frem til
+    neste endring. Selskaper med en uendret posisjon gjennom hele perioden tas
+    med ved å hente siste observasjon før startdatoen.
+    """
+    columns = ["issuerName", "date", "shortPercent"]
+    data = _agg_issuer_date(df)
+    if data.empty:
+        return pd.DataFrame(columns=columns)
+
+    start = pd.to_datetime(start_date, errors="coerce")
+    end = pd.to_datetime(end_date, errors="coerce")
+    if pd.isna(start) or pd.isna(end):
+        return pd.DataFrame(columns=columns)
+
+    start = pd.Timestamp(start).tz_localize(None).normalize()
+    end = pd.Timestamp(end).tz_localize(None).normalize()
+    if start > end:
+        return pd.DataFrame(columns=columns)
+
+    # Fremtidige observasjoner skal ikke påvirke analysevinduet. Alle utstedere
+    # som har hatt en observasjon innen sluttdatoen kan derimot ha et nivå som
+    # fortsatt gjelder i perioden, selv om siste endring skjedde før start.
+    data = data.loc[data["date"] <= end].copy()
+    if data.empty:
+        return pd.DataFrame(columns=columns)
+
+    day_index = pd.date_range(start=start, end=end, freq="D")
+    daily_frames = []
+
+    for issuer, issuer_data in data.groupby("issuerName", sort=False):
+        states = (
+            issuer_data.sort_values("date")
+            .drop_duplicates(subset=["date"], keep="last")
+            .set_index("date")["shortPercent"]
+        )
+        expanded_index = states.index.union(day_index).sort_values()
+        daily_values = (
+            states.reindex(expanded_index)
+            .ffill()
+            .reindex(day_index)
+            .fillna(0.0)
+        )
+        daily_frames.append(
+            pd.DataFrame(
+                {
+                    "issuerName": issuer,
+                    "date": day_index,
+                    "shortPercent": daily_values.to_numpy(dtype=float),
+                }
+            )
+        )
+
+    return pd.concat(daily_frames, ignore_index=True) if daily_frames else pd.DataFrame(columns=columns)
 
 
 def hent_siste_posisjon_per_selskap(df: pd.DataFrame) -> pd.DataFrame:
@@ -85,10 +161,11 @@ def dataframe_to_csv(df: pd.DataFrame) -> bytes:
 
 def vis_posisjonsholdere(df: pd.DataFrame, key_prefix: str = "holders") -> None:
     """Viser individuelle offentlige posisjonsholdere uten å påvirke aggregert historikk."""
-    st.subheader("Hvem shorter aksjene?")
-    st.caption(
-        "Dette er individuelle offentlige shortposisjoner fra Finanstilsynets activePositions. "
-        "Disse holdes separat fra den aggregerte historikken for å unngå dobbelttelling."
+    _render_table_header(
+        "Aktive posisjonsholdere",
+        "Individuelle offentlige posisjoner fra Finanstilsynets activePositions. "
+        "Holdes separat fra aggregert historikk for å unngå dobbelttelling.",
+        "LIVE REGISTER",
     )
 
     if df is None or df.empty:
@@ -171,102 +248,119 @@ def vis_posisjonsholdere(df: pd.DataFrame, key_prefix: str = "holders") -> None:
 
 def vis_hurtiginnsikt(df: pd.DataFrame, expanded: bool = False) -> None:
     with st.expander("Hurtig-innsikt: største endringer og nye posisjoner", expanded=expanded):
-        left, right = st.columns([1, 1], gap="medium")
+        # Fullbredde tabeller er mer robuste enn to smale sidekolonner. Det hindrer
+        # at dato/verdier klippes på små bærbare skjermer og ved nettleser-zoom.
+        changes = beregn_storste_endringer(df)
+        new_positions = finn_nye_shortposisjoner(df)
 
-        with left:
-            st.markdown("### Største endringer")
-            changes = beregn_storste_endringer(df)
+        st.markdown(
+            f"""
+            <div class="quick-summary">
+                <div><span>BEVEGELSER</span><strong>{len(changes):,}</strong><small>selskaper med målt endring</small></div>
+                <div><span>NYE OVER TERSKEL</span><strong>{len(new_positions):,}</strong><small>siste registrerte kryssing</small></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            if changes.empty:
-                st.info("Ingen endringer å vise.")
-            else:
-                changes_view = changes.copy()
-                changes_view["Retning"] = changes_view["endring"].apply(
-                    lambda value: "▲ Økning" if value > 0 else "▼ Reduksjon"
+        _render_table_header(
+            "Største endringer",
+            "Siste endring mot foregående registrerte nivå. Økning vises rødt, reduksjon grønt.",
+            "TOPP 10",
+        )
+
+        if changes.empty:
+            st.info("Ingen endringer å vise.")
+        else:
+            changes_view = changes.copy()
+            changes_view["Retning"] = changes_view["endring"].apply(
+                lambda value: "▲ Økning" if value > 0 else "▼ Reduksjon"
+            )
+            changes_view["Fra → til"] = changes_view.apply(
+                lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
+                axis=1,
+            )
+            changes_view["date"] = pd.to_datetime(
+                changes_view["date"], errors="coerce"
+            ).dt.strftime("%d.%m.%Y")
+            changes_view = (
+                changes_view[
+                    ["issuerName", "Retning", "Fra → til", "endring", "date"]
+                ]
+                .rename(
+                    columns={
+                        "issuerName": "Selskap",
+                        "endring": "Endring (pp)",
+                        "date": "Dato",
+                    }
                 )
-                changes_view["Fra → til"] = changes_view.apply(
-                    lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
-                    axis=1,
-                )
-                changes_view["date"] = pd.to_datetime(
-                    changes_view["date"], errors="coerce"
-                ).dt.strftime("%d.%m.%Y")
+                .head(10)
+            )
 
-                changes_view = (
-                    changes_view[
-                        ["issuerName", "Retning", "Fra → til", "endring", "date"]
-                    ]
-                    .rename(
-                        columns={
-                            "issuerName": "Selskap",
-                            "endring": "Endring (pp)",
-                            "date": "Dato",
-                        }
-                    )
-                    .head(10)
-                )
+            st.dataframe(
+                changes_view,
+                width="stretch",
+                hide_index=True,
+                height=42 + 35 * (len(changes_view) + 1),
+                column_config={
+                    "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+                    "Retning": st.column_config.TextColumn("Retning", width="small"),
+                    "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                    "Endring (pp)": st.column_config.NumberColumn(
+                        "Endring (pp)", format="%+.2f", width="small"
+                    ),
+                    "Dato": st.column_config.TextColumn("Dato", width="small"),
+                },
+            )
 
-                st.dataframe(
-                    changes_view,
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Selskap": st.column_config.TextColumn("Selskap", width=200),
-                        "Retning": st.column_config.TextColumn("Retning", width=90),
-                        "Fra → til": st.column_config.TextColumn("Fra → til", width=155),
-                        "Endring (pp)": st.column_config.NumberColumn(
-                            "Endring (pp)", format="%.2f", width=95
-                        ),
-                        "Dato": st.column_config.TextColumn("Dato", width=90),
-                    },
-                )
+        _render_table_header(
+            "Nye posisjoner over 0,5 %",
+            "Selskaper som sist krysset offentlig rapporteringsterskel.",
+            "NYE",
+        )
 
-        with right:
-            st.markdown("### Nye posisjoner over 0,5 %")
-            new_positions = finn_nye_shortposisjoner(df)
-
-            if new_positions.empty:
-                st.info("Ingen nye posisjoner å vise.")
-            else:
-                new_positions_view = new_positions.copy()
-                new_positions_view["forrige_short"] = new_positions_view[
-                    "forrige_short"
-                ].fillna(0.0)
-                new_positions_view["Fra → til"] = new_positions_view.apply(
-                    lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
-                    axis=1,
+        if new_positions.empty:
+            st.info("Ingen nye posisjoner å vise.")
+        else:
+            new_positions_view = new_positions.copy()
+            new_positions_view["forrige_short"] = new_positions_view[
+                "forrige_short"
+            ].fillna(0.0)
+            new_positions_view["Fra → til"] = new_positions_view.apply(
+                lambda row: f"{row['forrige_short']:.2f} % → {row['shortPercent']:.2f} %",
+                axis=1,
+            )
+            new_positions_view["date"] = pd.to_datetime(
+                new_positions_view["date"], errors="coerce"
+            ).dt.strftime("%d.%m.%Y")
+            new_positions_view = (
+                new_positions_view[
+                    ["issuerName", "Fra → til", "shortPercent", "date"]
+                ]
+                .rename(
+                    columns={
+                        "issuerName": "Selskap",
+                        "shortPercent": "Ny short %",
+                        "date": "Dato",
+                    }
                 )
-                new_positions_view["date"] = pd.to_datetime(
-                    new_positions_view["date"], errors="coerce"
-                ).dt.strftime("%d.%m.%Y")
+                .head(10)
+            )
 
-                new_positions_view = (
-                    new_positions_view[
-                        ["issuerName", "Fra → til", "shortPercent", "date"]
-                    ]
-                    .rename(
-                        columns={
-                            "issuerName": "Selskap",
-                            "shortPercent": "Ny short %",
-                            "date": "Dato",
-                        }
-                    )
-                    .head(10)
-                )
-
-                st.dataframe(
-                    new_positions_view,
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Selskap": st.column_config.TextColumn("Selskap", width=220),
-                        "Fra → til": st.column_config.TextColumn("Fra → til", width=175),
-                        "Ny short %": st.column_config.NumberColumn(
-                            "Ny short %", format="%.2f %%", width=95
-                        ),
-                        "Dato": st.column_config.TextColumn("Dato", width=90),
-                    },
-                )
+            st.dataframe(
+                new_positions_view,
+                width="stretch",
+                hide_index=True,
+                height=42 + 35 * (len(new_positions_view) + 1),
+                column_config={
+                    "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+                    "Fra → til": st.column_config.TextColumn("Fra → til", width="medium"),
+                    "Ny short %": st.column_config.NumberColumn(
+                        "Ny short %", format="%.2f %%", width="small"
+                    ),
+                    "Dato": st.column_config.TextColumn("Dato", width="small"),
+                },
+            )
 
 
 def vis_sok_og_graf(
@@ -284,11 +378,19 @@ def vis_sok_og_graf(
         st.error("Dataene mangler kolonnene: " + ", ".join(missing))
         return
 
-    search = st.text_input(
-        "Søk etter selskap eller ISIN",
-        placeholder="F.eks. EQUINOR, MPC eller NO0010096985",
-        key=f"{key_prefix}_search",
-    ).strip()
+    _render_table_header(
+        "Søk og filtrering",
+        "Avgrens registeret på selskap eller ISIN, velg visning og eksporter resultatet.",
+        "REGISTER",
+    )
+
+    filter_panel = st.container(key=f"{key_prefix}_filter_panel")
+    with filter_panel:
+        search = st.text_input(
+            "Søk etter selskap eller ISIN",
+            placeholder="F.eks. EQUINOR, MPC eller NO0010096985",
+            key=f"{key_prefix}_search",
+        ).strip()
 
     filtered = df.copy()
     if search:
@@ -330,13 +432,14 @@ def vis_sok_og_graf(
         return
 
     issuers = sorted(filtered["issuerName"].dropna().astype(str).unique().tolist())
-    selected = st.multiselect(
-        "Velg ett eller flere selskaper",
-        options=issuers,
-        default=issuers[:1] if search and issuers else [],
-        key=f"{key_prefix}_issuers",
-        placeholder="Velg selskaper – tomt valg viser alle",
-    )
+    with filter_panel:
+        selected = st.multiselect(
+            "Velg ett eller flere selskaper",
+            options=issuers,
+            default=issuers[:1] if search and issuers else [],
+            key=f"{key_prefix}_issuers",
+            placeholder="Velg selskaper – tomt valg viser alle",
+        )
 
     shown = (
         filtered.loc[filtered["issuerName"].astype(str).isin(selected)].copy()
@@ -363,26 +466,27 @@ def vis_sok_og_graf(
     )
     shown = shown.sort_values(["date", "issuerName"], ascending=[False, True])
 
-    controls_left, controls_middle, controls_right = st.columns([1.25, 1, 1])
-    with controls_left:
-        advanced = st.toggle(
-            "Vis avanserte kolonner",
-            value=False,
-            key=f"{key_prefix}_advanced_columns",
-        )
-    with controls_middle:
-        max_rows = st.selectbox(
-            "Rader i tabellen",
-            options=[25, 50, 100, 250, 500, 1000],
-            index=3,
-            key=f"{key_prefix}_max_rows",
-        )
-    with controls_right:
-        newest_only = st.toggle(
-            "Kun siste rad per selskap",
-            value=False,
-            key=f"{key_prefix}_latest_only",
-        )
+    with filter_panel:
+        controls_left, controls_middle, controls_right = st.columns([1.25, 1, 1])
+        with controls_left:
+            advanced = st.toggle(
+                "Vis avanserte kolonner",
+                value=False,
+                key=f"{key_prefix}_advanced_columns",
+            )
+        with controls_middle:
+            max_rows = st.selectbox(
+                "Rader i tabellen",
+                options=[25, 50, 100, 250, 500, 1000],
+                index=3,
+                key=f"{key_prefix}_max_rows",
+            )
+        with controls_right:
+            newest_only = st.toggle(
+                "Kun siste rad per selskap",
+                value=False,
+                key=f"{key_prefix}_latest_only",
+            )
 
     if newest_only:
         shown = shown.sort_values("date").groupby("issuerName", as_index=False).tail(1)
@@ -425,6 +529,12 @@ def vis_sok_og_graf(
             key=f"{key_prefix}_export_table",
             width="stretch",
         )
+
+    _render_table_header(
+        "Shortposisjoner",
+        "Klikk på kolonneoverskriftene for å sortere. Tabellen følger filtrene over.",
+        f"{len(table_view):,} RADER",
+    )
 
     column_config = {
         "Selskap": st.column_config.TextColumn("Selskap", width="medium"),
@@ -533,6 +643,26 @@ def _render_section_header(kicker: str, title: str, description: str) -> None:
             <div class="section-head-kicker">{html.escape(kicker)}</div>
             <div class="section-head-title">{html.escape(title)}</div>
             <div class="section-head-copy">{html.escape(description)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_table_header(title: str, description: str, badge: str = "") -> None:
+    badge_html = (
+        f'<span class="table-head-badge">{html.escape(badge)}</span>'
+        if badge
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class="table-head">
+            <div>
+                <div class="table-head-title">{html.escape(title)}</div>
+                <div class="table-head-copy">{html.escape(description)}</div>
+            </div>
+            {badge_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -1587,6 +1717,273 @@ st.markdown(
         background: #F9FAFB;
     }
 
+    /* Euronext-inspirert markedstavle: stramme flater, tydelige kurser. */
+    .market-board-label { margin: 28px 0 11px; color: #6F849B; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+    .market-card { min-height: 334px; border: 1px solid #DDE4EA; border-top: 3px solid #2FB3D8; background: #FFFFFF; }
+    .market-card-head { padding: 18px 20px 15px; border-bottom: 1px solid #E5E9EE; }
+    .market-card-title { color: #71879F; font-size: 1.02rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+    .market-card-subtitle { margin-top: 4px; color: #8B98A7; font-size: 0.71rem; }
+    .market-list { padding: 8px 20px 12px; }
+    .market-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 45px; border-bottom: 1px solid #E9EDF1; }
+    .market-row:last-child { border-bottom: 0; }
+    .market-name { overflow: hidden; color: #0877E8; font-size: 0.82rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .market-meta { display: block; margin-top: 2px; color: #8A97A6; font-size: 0.65rem; font-weight: 500; }
+    .market-value { color: #243447; font-size: 0.83rem; font-variant-numeric: tabular-nums; font-weight: 750; white-space: nowrap; }
+    .market-value--up { color: #E33B57; }
+    .market-value--down { color: #149447; }
+    .market-value--new { color: #0877E8; }
+    .market-status { margin-top: 12px; padding: 15px 18px; border: 1px solid #DDE4EA; background: #FFFFFF; }
+    .market-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; background: #07953A; color: #FFFFFF; font-size: 0.83rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+    .market-status-dot { width: 9px; height: 9px; border-radius: 50%; background: #A9F2BF; box-shadow: 0 0 0 4px rgba(255,255,255,0.18); }
+    .st-key-market_chart_card { min-height: 334px; padding: 0 12px 8px; border: 1px solid #DDE4EA; border-top: 3px solid #2FB3D8; background: #FFFFFF; }
+    .st-key-market_chart_card [data-testid="stPlotlyChart"] { border: 0; border-radius: 0; }
+
+    /* ---------------- V3: EURONEXT REGISTER SYSTEM ---------------- */
+    :root {
+        --canvas: #EFF2F5;
+        --surface: #FFFFFF;
+        --ink: #172232;
+        --ink-2: #364152;
+        --blue: #0877E8;
+        --cyan: #3CB4DC;
+        --teal: #007E73;
+        --mint: #149447;
+        --red: #E33B57;
+        --muted: #75869A;
+        --line: #DDE4EA;
+    }
+
+    .stApp { background: #EFF2F5; color: var(--ink-2); }
+
+    [data-testid="stHeader"] {
+        background: rgba(255,255,255,0.96);
+        border-bottom: 3px solid #00776D;
+        backdrop-filter: blur(12px);
+    }
+
+    section.main > div.block-container,
+    .block-container {
+        max-width: 1460px !important;
+        padding-left: 1.6rem !important;
+        padding-right: 1.6rem !important;
+    }
+
+    .hero {
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid #D9E1E8;
+        border-top: 5px solid #00776D;
+        border-radius: 2px;
+        background: #FFFFFF;
+    }
+
+    .hero-grid { padding: 29px 34px 25px; }
+    .brand-lockup { margin-bottom: 23px; }
+    .brand-mark { border: 0; border-radius: 2px; background: linear-gradient(135deg, #00776D, #38B5D8); }
+    .brand-name { color: #16324A; font-size: 0.82rem; }
+    .hero-kicker { color: #00776D; }
+    .hero-kicker:before { background: #22A447; }
+    .hero .hero-title { color: #18344C !important; font-size: clamp(2.55rem, 5vw, 4.45rem); }
+    .hero .hero-title span { color: #941919 !important; }
+    .hero-lead { color: #3C4B5C !important; }
+    .hero-copy { color: #758292 !important; }
+    .hero-badge { border-radius: 2px; border-color: #DCE4EA; background: #F4F7F9; color: #526274; }
+    .hero-foot { margin: 0; padding: 12px 34px; border-top: 1px solid #E2E7EB; background: #F7F9FA; color: #7C8997; }
+
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0 !important;
+        margin: 0 0 24px;
+        padding: 0 12px !important;
+        border: 0;
+        border-radius: 0;
+        background: #3CB4DC !important;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        min-height: 53px !important;
+        padding: 0 22px !important;
+        border: 0 !important;
+        border-bottom: 4px solid transparent !important;
+        color: #10283B !important;
+        font-size: 0.76rem !important;
+        font-weight: 800 !important;
+        letter-spacing: 0.035em;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover { background: rgba(255,255,255,0.14) !important; color: #071A29 !important; }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] { border-bottom-color: #0B263B !important; background: rgba(255,255,255,0.16) !important; color: #071A29 !important; }
+
+    .section-head {
+        margin: 0 0 18px;
+        padding: 21px 25px 20px;
+        border: 1px solid #DCE3E9;
+        border-top: 3px solid #71879F;
+        background: #FFFFFF;
+    }
+
+    .section-head-kicker { color: #008376; }
+    .section-head-title { margin-top: 5px; color: #243A4E; font-size: 2rem; }
+    .section-head-copy { color: #748293; }
+
+    .freshness-bar {
+        border: 1px solid #DCE4EA;
+        border-radius: 0;
+        background: #FFFFFF;
+    }
+
+    div[data-testid="stMetric"] {
+        min-height: 126px;
+        border: 1px solid #DCE4EA;
+        border-top: 3px solid #3CB4DC;
+        border-radius: 0;
+        background: #FFFFFF;
+    }
+
+    div[data-testid="stMetric"] label { color: #71859B !important; }
+    div[data-testid="stMetricValue"] { color: #233A50 !important; }
+    div[data-testid="stMetricDelta"] { color: #0877E8 !important; }
+
+    .table-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-top: 18px;
+        padding: 16px 18px 14px;
+        border: 1px solid #DCE4EA;
+        border-bottom: 0;
+        border-top: 3px solid #71879F;
+        background: #FFFFFF;
+    }
+
+    .table-head-title { color: #6F849B; font-size: 0.91rem; font-weight: 800; letter-spacing: 0.115em; text-transform: uppercase; }
+    .table-head-copy { margin-top: 4px; color: #8693A1; font-size: 0.71rem; line-height: 1.45; }
+    .table-head-badge { flex: 0 0 auto; padding: 5px 8px; border: 1px solid #B8DFEB; background: #EDF9FC; color: #00776D; font-size: 0.63rem; font-weight: 850; letter-spacing: 0.08em; }
+
+    .quick-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        margin: 5px 0 14px;
+        border: 1px solid #DCE4EA;
+        background: #DCE4EA;
+    }
+
+    .quick-summary > div {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        grid-template-rows: auto auto;
+        column-gap: 14px;
+        align-items: center;
+        padding: 14px 16px;
+        background: #F8FAFB;
+    }
+
+    .quick-summary span { grid-column: 1 / -1; color: #71859B; font-size: 0.61rem; font-weight: 850; letter-spacing: 0.11em; }
+    .quick-summary strong { color: #263D51; font-size: 1.55rem; line-height: 1.1; }
+    .quick-summary small { color: #8794A2; font-size: 0.68rem; }
+
+    .st-key-live_filter_panel,
+    .st-key-db_filter_panel {
+        margin-bottom: 16px;
+        padding: 17px 18px 7px;
+        border: 1px solid #DCE4EA;
+        border-top: 0;
+        background: #FFFFFF;
+    }
+
+    .st-key-live_filter_panel [data-testid="stHorizontalBlock"],
+    .st-key-db_filter_panel [data-testid="stHorizontalBlock"] { align-items: end; }
+
+    .register-status-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        margin: 8px 0 4px;
+        padding: 19px 22px;
+        border: 1px solid #DCE4EA;
+        border-left: 5px solid #149447;
+        background: #FFFFFF;
+    }
+
+    .register-status-card > div:first-child { display: grid; gap: 3px; }
+    .register-status-card strong { color: #263D51; font-size: 0.98rem; }
+    .register-status-card small { color: #81909F; }
+    .register-status-eyebrow { color: #149447; font-size: 0.62rem; font-weight: 850; letter-spacing: 0.12em; }
+    .register-status-count { color: #243A50; font-size: 1.65rem; font-weight: 800; line-height: 1; text-align: right; }
+    .register-status-count span { display: block; margin-top: 6px; color: #8794A2; font-size: 0.61rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    [data-testid="stDataFrame"] {
+        overflow: hidden;
+        border: 1px solid #DCE4EA !important;
+        border-radius: 0 !important;
+        background: #FFFFFF !important;
+    }
+
+    [data-testid="stDataFrame"] > div { border-radius: 0 !important; }
+    [data-testid="stDataFrame"] button { color: #0877E8 !important; }
+
+    [data-testid="stPlotlyChart"] {
+        overflow: hidden;
+        border: 1px solid #DCE4EA;
+        border-top: 3px solid #71879F;
+        border-radius: 0;
+        background: #FFFFFF;
+    }
+
+    [data-testid="stExpander"] {
+        border: 1px solid #DCE4EA;
+        border-radius: 0;
+        background: #FFFFFF;
+    }
+
+    [data-testid="stExpander"] summary { color: #334A60; font-weight: 750; }
+    [data-testid="stTextInput"] label,
+    [data-testid="stSelectbox"] label,
+    [data-testid="stMultiSelect"] label,
+    [data-testid="stToggle"] label { color: #516173 !important; font-size: 0.76rem !important; font-weight: 700 !important; }
+
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    [data-testid="stTextInput"] input,
+    [data-baseweb="tag"] {
+        border-radius: 2px !important;
+    }
+
+    div[data-baseweb="input"] > div:focus-within,
+    div[data-baseweb="select"] > div:focus-within { border-color: #3CB4DC !important; box-shadow: 0 0 0 2px rgba(60,180,220,0.13) !important; }
+
+    .stButton > button,
+    .st-key-refresh_action .stButton > button {
+        border: 1px solid #00776D !important;
+        border-radius: 2px !important;
+        background: #00776D !important;
+        color: #FFFFFF !important;
+    }
+
+    .stButton > button:hover,
+    .st-key-refresh_action .stButton > button:hover { border-color: #00645C !important; background: #00645C !important; }
+
+    .stDownloadButton > button {
+        border-color: #9CCFDC !important;
+        border-radius: 2px !important;
+        background: #FFFFFF !important;
+        color: #00776D !important;
+    }
+
+    .stDownloadButton > button:hover { border-color: #3CB4DC !important; background: #EDF9FC !important; color: #00645C !important; }
+
+    div[data-testid="stAlert"] { border-radius: 0; }
+    hr { border-color: #DCE3E9 !important; }
+    h2, h3 { color: #2B4156 !important; }
+
+    .market-board-label { padding: 12px 15px; margin-bottom: 0; border: 1px solid #DCE4EA; border-bottom: 0; background: #FFFFFF; }
+    .market-card, .market-status, .st-key-market_chart_card { border-radius: 0; }
+    .market-card, .st-key-market_chart_card { border-top-color: #3CB4DC; }
+    .about-card { border-radius: 0; border-top: 3px solid #71879F; }
+    .method-note { border-radius: 0; border-left-color: #00776D; }
+
     @media (max-width: 760px) {
         section.main > div.block-container,
         .block-container {
@@ -1658,6 +2055,15 @@ st.markdown(
             padding: 18px !important;
         }
 
+        .market-card,
+        .st-key-market_chart_card { min-height: 0 !important; }
+
+        .table-head { align-items: flex-start; padding: 14px; }
+        .table-head-badge { display: none; }
+        .register-status-card { align-items: flex-start; flex-direction: column; }
+        .register-status-count { text-align: left; }
+        .quick-summary { grid-template-columns: 1fr; }
+
         .insight-company,
         .insight-detail,
         .section-head-copy,
@@ -1695,6 +2101,450 @@ st.markdown(
             padding: 0 10px !important;
         }
     }
+
+    /* ---------------- V5: TAILWIND PRO / COMPILED CSS ----------------
+       Ingen CDN eller JavaScript: robust i Streamlit 1.50 og på Cloud. */
+    :root {
+        --tw-slate-950: #020617;
+        --tw-slate-900: #0F172A;
+        --tw-slate-800: #1E293B;
+        --tw-slate-700: #334155;
+        --tw-slate-500: #64748B;
+        --tw-slate-200: #E2E8F0;
+        --tw-slate-100: #F1F5F9;
+        --tw-blue-600: #2563EB;
+        --tw-cyan-500: #06B6D4;
+        --tw-emerald-500: #10B981;
+        --tw-rose-500: #F43F5E;
+        --tw-ring: rgba(37, 99, 235, 0.18);
+        --tw-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+        --tw-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+        --tw-shadow-lg: 0 24px 70px rgba(2, 6, 23, 0.20);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    .stApp {
+        background:
+            radial-gradient(circle at 7% 1%, rgba(37,99,235,.10), transparent 27rem),
+            radial-gradient(circle at 96% 10%, rgba(6,182,212,.09), transparent 28rem),
+            #F8FAFC;
+        color: var(--tw-slate-800);
+    }
+
+    ::selection { background: rgba(6,182,212,.24); color: #082F49; }
+
+    [data-testid="stHeader"] {
+        background: rgba(248,250,252,.82);
+        border-bottom: 1px solid rgba(148,163,184,.22);
+        backdrop-filter: blur(18px) saturate(160%);
+    }
+
+    .hero {
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        padding: 0;
+        border: 1px solid rgba(148,163,184,.34);
+        border-top: 4px solid #2BA6A0;
+        border-radius: 20px;
+        background:
+            radial-gradient(circle at 92% -18%, rgba(79,180,191,.16), transparent 29rem),
+            linear-gradient(124deg, #0A1A2B 0%, #102B40 60%, #12364A 100%);
+        box-shadow: 0 22px 58px rgba(15,23,42,.18);
+    }
+
+    .hero:before {
+        display: block;
+        content: "";
+        position: absolute;
+        width: 520px;
+        height: 520px;
+        right: -235px;
+        bottom: -345px;
+        z-index: -1;
+        border: 1px solid rgba(148,210,218,.15);
+        border-radius: 50%;
+        box-shadow:
+            0 0 0 74px rgba(148,210,218,.025),
+            0 0 0 148px rgba(148,210,218,.018);
+    }
+
+    .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.42fr) minmax(310px, .68fr);
+        gap: 58px;
+        align-items: center;
+        padding: 43px 44px 36px;
+    }
+
+    .brand-lockup { margin-bottom: 35px; }
+    .brand-mark {
+        width: 38px;
+        height: 38px;
+        border: 1px solid rgba(181,220,225,.38);
+        border-radius: 7px;
+        background: rgba(255,255,255,.075);
+        color: #DDF4F5;
+        box-shadow: inset 0 1px rgba(255,255,255,.10);
+    }
+    .brand-name { color: #DCE8F0; font-size: .72rem; letter-spacing: .17em; }
+    .hero-kicker {
+        color: #88C9CE;
+        margin-bottom: 15px;
+        font-size: .68rem;
+        letter-spacing: .14em;
+    }
+    .hero-kicker:before {
+        width: 24px;
+        height: 1px;
+        border-radius: 0;
+        background: #4CB6B4;
+        box-shadow: none;
+        animation: none;
+    }
+    .hero .hero-title {
+        overflow: visible;
+        color: #F8FAFC !important;
+        font-size: clamp(3rem, 5.35vw, 4.8rem);
+        line-height: .96;
+        font-weight: 820;
+        letter-spacing: -.052em;
+    }
+    .hero .hero-title-main {
+        display: block;
+        color: #F8FAFC !important;
+    }
+    .hero .hero-title-accent {
+        display: block;
+        width: max-content;
+        max-width: 100%;
+        padding: .06em .15em .06em 0;
+        color: #FFFFFF !important;
+        font-weight: 760;
+        letter-spacing: -.045em;
+    }
+    .hero-lead {
+        max-width: 720px;
+        color: #D7E3EB !important;
+        font-size: clamp(1.08rem, 1.65vw, 1.32rem);
+        font-weight: 650;
+        letter-spacing: -.015em;
+        margin-top: 22px;
+    }
+    .hero-copy {
+        max-width: 650px;
+        color: #91A7B8 !important;
+        font-size: .94rem;
+        line-height: 1.68;
+        margin-top: 10px;
+    }
+    .hero-badges {
+        gap: 18px;
+        margin-top: 25px;
+    }
+    .hero-badge {
+        padding: 1px 0 1px 11px;
+        border: 0;
+        border-left: 1px solid rgba(115,198,204,.45);
+        border-radius: 0;
+        background: transparent;
+        color: #AFC1CD;
+        font-size: .66rem;
+        letter-spacing: .06em;
+        backdrop-filter: none;
+    }
+    .hero-badge:hover { border-color: #73C6CC; background: transparent; color: #E1EEF2; }
+    .hero-foot {
+        margin: 0;
+        padding: 13px 44px;
+        border-top: 1px solid rgba(148,163,184,.13);
+        background: rgba(3,13,24,.25);
+        color: #71899A;
+        font-size: .64rem;
+        letter-spacing: .075em;
+    }
+
+    .tw-terminal {
+        overflow: hidden;
+        border: 1px solid rgba(226,232,240,.92);
+        border-radius: 14px;
+        background: rgba(255,255,255,.965);
+        box-shadow: 0 18px 42px rgba(2,12,27,.21);
+        backdrop-filter: blur(12px);
+    }
+    .tw-terminal-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 15px 17px 13px;
+        border-bottom: 1px solid #E7EDF2;
+        color: #16364D;
+        font-size: .65rem;
+        font-weight: 850;
+        letter-spacing: .13em;
+    }
+    .tw-live-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: #12805C;
+        font-size: .61rem;
+        letter-spacing: .08em;
+    }
+    .tw-live-status i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #21A67A;
+        box-shadow: 0 0 0 3px rgba(33,166,122,.10);
+    }
+    .tw-terminal-body { display: grid; gap: 0; padding: 6px 17px 15px; }
+    .tw-terminal-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+    .tw-terminal-row { min-height: 46px; }
+    .tw-terminal-row span { color: #728395; font-size: .65rem; font-weight: 700; letter-spacing: .055em; }
+    .tw-terminal-row strong { color: #17364C; font-size: .74rem; font-weight: 800; text-align: right; }
+    .tw-terminal-line { height: 1px; background: #E9EEF2; }
+    .tw-terminal-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 8px;
+        padding: 11px 12px;
+        border: 1px solid #CFE8E2;
+        border-radius: 8px;
+        background: #F0F8F6;
+        color: #55716B;
+        font-size: .65rem;
+        font-weight: 700;
+        letter-spacing: .035em;
+    }
+    .tw-terminal-status strong { color: #13775B; font-size: .67rem; letter-spacing: .06em; }
+
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 7px !important;
+        margin: 0 0 25px;
+        padding: 7px !important;
+        border: 1px solid #E2E8F0;
+        border-radius: 16px;
+        background: rgba(255,255,255,.88) !important;
+        box-shadow: var(--tw-shadow-sm);
+        backdrop-filter: blur(14px);
+    }
+    .stTabs [data-baseweb="tab"] {
+        min-height: 43px !important;
+        padding: 0 18px !important;
+        border: 0 !important;
+        border-radius: 10px !important;
+        color: #64748B !important;
+        transition: color .18s ease, background .18s ease, transform .18s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover { background: #F1F5F9 !important; color: #0F172A !important; transform: translateY(-1px); }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        border: 0 !important;
+        background: linear-gradient(135deg, #2563EB, #0891B2) !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 8px 22px rgba(37,99,235,.22);
+    }
+
+    .section-head {
+        position: relative;
+        overflow: hidden;
+        margin-bottom: 20px;
+        padding: 23px 25px 22px;
+        border: 1px solid #E2E8F0;
+        border-top: 1px solid #E2E8F0;
+        border-radius: 16px;
+        background: rgba(255,255,255,.94);
+        box-shadow: var(--tw-shadow-sm);
+    }
+    .section-head:before {
+        display: block;
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        background: linear-gradient(180deg, #2563EB, #06B6D4);
+    }
+    .section-head-kicker { color: #0284C7; }
+    .section-head-title { color: #0F172A; }
+
+    .freshness-bar {
+        border: 1px solid #E2E8F0;
+        border-radius: 13px;
+        background: rgba(255,255,255,.92);
+        box-shadow: var(--tw-shadow-sm);
+    }
+
+    div[data-testid="stMetric"] {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid #E2E8F0;
+        border-top: 1px solid #E2E8F0;
+        border-radius: 16px;
+        background: linear-gradient(145deg, #FFFFFF, #F8FAFC);
+        box-shadow: var(--tw-shadow-sm);
+        transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+    div[data-testid="stMetric"]:before {
+        display: block;
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: linear-gradient(180deg, #2563EB, #06B6D4);
+    }
+    div[data-testid="stMetric"]:hover { transform: translateY(-3px); border-color: #BFDBFE; box-shadow: var(--tw-shadow); }
+
+    .market-board-label {
+        padding: 13px 17px;
+        border: 1px solid #E2E8F0;
+        border-bottom: 0;
+        border-radius: 14px 14px 0 0;
+        background: rgba(255,255,255,.92);
+    }
+    .market-card,
+    .st-key-market_chart_card {
+        overflow: hidden;
+        border: 1px solid #E2E8F0;
+        border-top: 3px solid #22D3EE;
+        border-radius: 16px;
+        background: #FFFFFF;
+        box-shadow: var(--tw-shadow-sm);
+        transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .market-card:hover,
+    .st-key-market_chart_card:hover { transform: translateY(-2px); box-shadow: var(--tw-shadow); }
+    .market-card-head { background: linear-gradient(135deg, #F8FAFC, #FFFFFF); }
+    .market-name { color: #2563EB; }
+    .market-status { border: 1px solid #D1FAE5; border-radius: 14px; box-shadow: var(--tw-shadow-sm); }
+    .market-status-bar { border-radius: 9px; background: linear-gradient(135deg, #059669, #10B981); }
+
+    .table-head {
+        margin-top: 19px;
+        padding: 17px 19px 15px;
+        border: 1px solid #E2E8F0;
+        border-bottom: 0;
+        border-top: 1px solid #E2E8F0;
+        border-radius: 14px 14px 0 0;
+        background: linear-gradient(135deg, #F8FAFC, #FFFFFF);
+    }
+    .table-head-title { color: #334155; }
+    .table-head-badge { border-color: #BAE6FD; border-radius: 999px; background: #F0F9FF; color: #0369A1; }
+    [data-testid="stDataFrame"] {
+        border-color: #E2E8F0 !important;
+        border-radius: 0 0 14px 14px !important;
+        box-shadow: var(--tw-shadow-sm);
+    }
+    [data-testid="stDataFrame"] > div { border-radius: 0 0 14px 14px !important; }
+
+    .quick-summary {
+        gap: 10px;
+        border: 0;
+        background: transparent;
+    }
+    .quick-summary > div {
+        border: 1px solid #E2E8F0;
+        border-radius: 13px;
+        background: linear-gradient(145deg, #FFFFFF, #F8FAFC);
+        box-shadow: var(--tw-shadow-sm);
+    }
+
+    .st-key-live_filter_panel,
+    .st-key-db_filter_panel {
+        border-color: #E2E8F0;
+        border-radius: 0 0 14px 14px;
+        background: #FFFFFF;
+        box-shadow: var(--tw-shadow-sm);
+    }
+
+    [data-testid="stPlotlyChart"] {
+        border: 1px solid #E2E8F0;
+        border-top: 1px solid #E2E8F0;
+        border-radius: 16px;
+        box-shadow: var(--tw-shadow-sm);
+    }
+    [data-testid="stExpander"] {
+        overflow: hidden;
+        border: 1px solid #E2E8F0;
+        border-radius: 14px;
+        box-shadow: var(--tw-shadow-sm);
+    }
+    [data-testid="stExpander"] summary { background: linear-gradient(135deg, #FFFFFF, #F8FAFC); }
+
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="select"] > div,
+    [data-testid="stTextInput"] input,
+    [data-baseweb="tag"] { border-radius: 10px !important; }
+    div[data-baseweb="input"] > div:focus-within,
+    div[data-baseweb="select"] > div:focus-within { border-color: #60A5FA !important; box-shadow: 0 0 0 4px var(--tw-ring) !important; }
+
+    .stButton > button,
+    .st-key-refresh_action .stButton > button {
+        border: 0 !important;
+        border-radius: 10px !important;
+        background: linear-gradient(135deg, #2563EB, #0891B2) !important;
+        box-shadow: 0 9px 24px rgba(37,99,235,.20);
+        transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+    }
+    .stButton > button:hover,
+    .st-key-refresh_action .stButton > button:hover { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 13px 30px rgba(37,99,235,.27); }
+    .stDownloadButton > button {
+        border-color: #CBD5E1 !important;
+        border-radius: 10px !important;
+        background: #FFFFFF !important;
+        color: #334155 !important;
+    }
+    .stDownloadButton > button:hover { border-color: #93C5FD !important; background: #EFF6FF !important; color: #1D4ED8 !important; transform: translateY(-1px); }
+
+    .register-status-card {
+        border: 1px solid #D1FAE5;
+        border-left: 4px solid #10B981;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #FFFFFF, #F0FDF4);
+        box-shadow: var(--tw-shadow-sm);
+    }
+    .about-card {
+        border: 1px solid #E2E8F0;
+        border-top: 1px solid #E2E8F0;
+        border-radius: 16px;
+        box-shadow: var(--tw-shadow-sm);
+        transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .about-card:hover { transform: translateY(-3px); box-shadow: var(--tw-shadow); }
+    .method-note { border-radius: 14px; border-left-color: #2563EB; background: #EFF6FF; }
+    div[data-testid="stAlert"] { border-radius: 12px; box-shadow: var(--tw-shadow-sm); }
+
+    @keyframes tw-pulse {
+        0%, 100% { opacity: .72; transform: scale(.95); }
+        50% { opacity: 1; transform: scale(1.08); }
+    }
+
+    @media (max-width: 900px) {
+        .hero-grid { grid-template-columns: 1fr; gap: 24px; }
+        .tw-terminal { max-width: 640px; }
+    }
+
+    @media (max-width: 760px) {
+        .hero { padding: 0; border-radius: 15px; }
+        .hero-grid { padding: 28px 20px 23px; }
+        .brand-lockup { margin-bottom: 27px; }
+        .hero .hero-title { font-size: clamp(2.62rem, 13vw, 3.45rem); line-height: .98; }
+        .hero .hero-title-accent { padding-right: .18em; }
+        .hero-badges { display: grid; gap: 9px; }
+        .hero-badge { padding-left: 9px; }
+        .hero-foot { padding: 12px 19px; }
+        .hero-foot span:last-child { display: none; }
+        .tw-terminal { border-radius: 14px; }
+        .stTabs [data-baseweb="tab-list"] { border-radius: 13px; padding: 5px !important; }
+        .stTabs [data-baseweb="tab"] { min-height: 39px !important; padding: 0 11px !important; }
+        .section-head { border-radius: 14px; padding: 20px 18px 18px; }
+        .market-card, .st-key-market_chart_card, [data-testid="stPlotlyChart"] { border-radius: 14px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
     </style>
 
     <div class="hero">
@@ -1703,23 +2553,42 @@ st.markdown(
                 <div class="brand-lockup">
                     <div class="brand-mark">SR</div>
                     <div>
-                        <span class="brand-name">Velkommen!</span>
+                        <span class="brand-name">VELKOMMEN!</span>
                     </div>
                 </div>
-                <div class="hero-kicker">Denne plattformen/appen ble laget og utviklet ved Universitetet i Oxford - Säid Business School</div>
-                <h1 class="hero-title">Shortregister over selskaper på<span> Oslo Børs</span></h1>
-                <p class="hero-lead">Se deg gjerne litt rundt og scroll nedover for å se mer i appen og resten av registeret</p>
+                <div class="hero-kicker">Offentlig SSR-data · analyse og historikk</div>
+                <h1 class="hero-title">
+                    <span class="hero-title-main">Shortregister</span>
+                    <span class="hero-title-accent">for Oslo Børs</span>
+                </h1>
+                <p class="hero-lead">Denne plattformen gir et samlet markedsbilde av offentlig rapporterte shortposisjoner.</p>
                 <p class="hero-copy">
-                    Her kan man også søke, sammenligne og følge utviklingen i offentlig rapporterte shortposisjoner.
+                    Her kan du søke etter selskaper og posisjonsholdere, sammenligne nivåer og følge utviklingen over tid.
                 </p>
                 <div class="hero-badges">
-                    <span class="hero-badge">FINANSTILSYNET SSR V2-API</span>
-                    <span class="hero-badge">OFFENTLIG TERSKELEN ER: ≥ 0,50 %</span>
+                    <span class="hero-badge">FINANSTILSYNETS SSR V2-API</span>
+                    <span class="hero-badge">OFFENTLIG TERSKEL FOR RAPPORTERING ER: ≥ 0,50 %</span>
+                    <span class="hero-badge">PLATTFORMEN BESTÅR AV INTERAKTIVE TABELLER OG GRAFER</span>
+                </div>
+            </div>
+            <div class="tw-terminal" aria-label="Registerstatus">
+                <div class="tw-terminal-top">
+                    <span>REGISTERSTATUS</span>
+                    <span class="tw-live-status"><i></i> LIVE</span>
+                </div>
+                <div class="tw-terminal-body">
+                    <div class="tw-terminal-row"><span>DATAKILDE</span><strong>FINANSTILSYNET SSR V2</strong></div>
+                    <div class="tw-terminal-line"></div>
+                    <div class="tw-terminal-row"><span>DEKNING</span><strong>LIVE + HISTORIKK</strong></div>
+                    <div class="tw-terminal-line"></div>
+                    <div class="tw-terminal-row"><span>TERSKEL</span><strong>≥ 0,50 %</strong></div>
+                    <div class="tw-terminal-status"><span>OFFENTLIG REGISTER</span><strong>OPPDATERT</strong></div>
                 </div>
             </div>
         </div>
         <div class="hero-foot">
             <span>Utviklet av Andreas Bolton Seielstad</span>
+            <span>Uavhengig analyseverktøy</span>
         </div>
     </div>
     """,
@@ -1736,7 +2605,7 @@ with st.spinner("Laster delt datagrunnlag …"):
 df_db = hent_database_data()
 
 tab_live, tab_db, tab_top10, tab_about = st.tabs(
-    ["Live-søk over shortede selskaper", "Søk i selskaper", "Topp 10-shortede selskaper", "Om plattformen"]
+    ["●  LIVE", "⌕  SELSKAPSSØK", "▥  TOPP 10", "ⓘ  OM"]
 )
 
 with tab_live:
@@ -1825,7 +2694,7 @@ with tab_live:
             delta_color="off",
         )
 
-        with st.expander("Hvor er Frontline og andre manglende selskaper?", expanded=False):
+        with st.expander("Hvor er Frontline og andre selskaper som man ikke finner i listen?", expanded=False):
             st.markdown(
                 "**Frontline mangler ikke på grunn av en feil i appen.** Finanstilsynet "
                 "har unntatt enkelte aksjer fra SSR-rapportering. I tillegg viser API-et "
@@ -1844,6 +2713,11 @@ with tab_live:
                 exempt_view["Unntatt fra"] = pd.to_datetime(
                     exempt_view["Unntatt fra"], errors="coerce"
                 ).dt.strftime("%d.%m.%Y")
+                _render_table_header(
+                    "Instrumenter unntatt SSR-rapportering",
+                    "Listen kommer fra Finanstilsynets offentlige unntaksoversikt.",
+                    f"{len(exempt_view):,} INSTRUMENTER",
+                )
                 st.dataframe(
                     exempt_view[["Selskap", "ISIN", "Status", "Unntatt fra"]],
                     width="stretch",
@@ -1937,57 +2811,53 @@ with tab_live:
             )
             new_detail = f"{new_holder} · Registrert {new_date_text}"
 
-        st.markdown("### Markedssignaler")
-        st.info(
-            "Her vises største siste reduksjon, største siste økning og nyeste posisjon over 0,5 %. Tallene bygger på siste registrerte nivå per selskap."
-        )
-        signal_col1, signal_col2, signal_col3 = st.columns(3)
+        st.markdown('<div class="market-board-label">Markedspuls</div>', unsafe_allow_html=True)
+        board_left, board_middle, board_right = st.columns([1, 1.18, 1])
 
-        decrease_title = html.escape(
-            f"{decrease_company} → {decrease_value} → {decrease_detail}"
-        )
-        increase_title = html.escape(
-            f"{increase_company} → {increase_value} → {increase_detail}"
-        )
-        new_title = html.escape(
-            f"{new_company} → {new_value} → {new_detail}"
-        )
+        top_rows = []
+        for _, row in current_positions.head(5).iterrows():
+            company = html.escape(str(row.get("issuerName") or "Ukjent selskap"))
+            value = float(row.get("shortPercent", 0.0))
+            top_rows.append(
+                f'<div class="market-row"><div class="market-name" title="{company}">{company}'
+                f'<span class="market-meta">Gjeldende aggregert posisjon</span></div>'
+                f'<div class="market-value market-value--up">{value:.2f} %</div></div>'
+            )
 
-        with signal_col1:
+        with board_left:
             st.markdown(
                 f"""
-                <div class="insight-card insight-card--down" title="{decrease_title}">
-                    <div class="insight-kicker"> Største siste reduksjon</div>
-                    <div class="insight-value">{html.escape(decrease_value)}</div>
-                    <div class="insight-company">{html.escape(decrease_company)}</div>
-                    <div class="insight-detail">{html.escape(decrease_detail)}</div>
+                <div class="market-card">
+                    <div class="market-card-head"><div class="market-card-title">Mest shortet</div><div class="market-card-subtitle">Siste rapporterte nivå per selskap</div></div>
+                    <div class="market-list">{''.join(top_rows)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-        with signal_col2:
-            st.markdown(
-                f"""
-                <div class="insight-card insight-card--up" title="{increase_title}">
-                    <div class="insight-kicker"> Største siste økning</div>
-                    <div class="insight-value">{html.escape(increase_value)}</div>
-                    <div class="insight-company">{html.escape(increase_company)}</div>
-                    <div class="insight-detail">{html.escape(increase_detail)}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        with board_middle:
+            with st.container(key="market_chart_card"):
+                st.markdown('<div class="market-card-head"><div class="market-card-title">Shortdiagram</div><div class="market-card-subtitle">Topp 5 · offentlig shortandel</div></div>', unsafe_allow_html=True)
+                chart_data = current_positions.head(5).sort_values("shortPercent")
+                pulse_fig = px.bar(chart_data, x="shortPercent", y="issuerName", orientation="h", text="shortPercent")
+                pulse_fig.update_traces(marker_color="#35B7D8", texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False, hovertemplate="%{y}<br>%{x:.2f} %<extra></extra>")
+                pulse_fig.update_layout(height=250, margin=dict(l=8, r=42, t=8, b=12), paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF", showlegend=False, xaxis=dict(visible=False, rangemode="tozero"), yaxis=dict(title=None, tickfont=dict(size=10, color="#354052")), font=dict(family="Inter, sans-serif", color="#354052"))
+                st.plotly_chart(pulse_fig, width="stretch", config={"displayModeBar": False})
 
-        with signal_col3:
+        movement_rows = (
+            f'<div class="market-row"><div class="market-name">{html.escape(increase_company)}<span class="market-meta">Største siste økning</span></div><div class="market-value market-value--up">{html.escape(increase_value)}</div></div>'
+            f'<div class="market-row"><div class="market-name">{html.escape(decrease_company)}<span class="market-meta">Største siste reduksjon</span></div><div class="market-value market-value--down">{html.escape(decrease_value)}</div></div>'
+            f'<div class="market-row"><div class="market-name">{html.escape(new_company)}<span class="market-meta">Nyeste posisjon over terskel</span></div><div class="market-value market-value--new">{html.escape(new_value)}</div></div>'
+        )
+
+        with board_right:
             st.markdown(
                 f"""
-                <div class="insight-card insight-card--new" title="{new_title}">
-                    <div class="insight-kicker"> Nyeste posisjon over 0,5 %</div>
-                    <div class="insight-value">{html.escape(new_value)}</div>
-                    <div class="insight-company">{html.escape(new_company)}</div>
-                    <div class="insight-detail">{html.escape(new_detail)}</div>
+                <div class="market-card">
+                    <div class="market-card-head"><div class="market-card-title">Siste bevegelser</div><div class="market-card-subtitle">Endring i prosentpoeng</div></div>
+                    <div class="market-list">{movement_rows}</div>
                 </div>
+                <div class="market-status"><div class="market-card-subtitle">Sist observert {latest_date_text}</div><div class="market-status-bar"><span>Data online</span><span class="market-status-dot"></span></div></div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -2020,14 +2890,20 @@ with tab_live:
         )
 
         vis_hurtiginnsikt(df_live, expanded=True)
-        st.subheader("Søk og filtrering")
         vis_sok_og_graf(df_live, "live", df_exempt)
 
     st.divider()
-    st.subheader("Status for SQLite-registeret")
     latest_time, total_rows = hent_siste_oppdatering()
     if latest_time:
-        st.markdown(f" Historikk sist oppdatert: {latest_time}  \n Totalt antall lagrede rader: {total_rows:,}")
+        st.markdown(
+            f"""
+            <div class="register-status-card">
+                <div><span class="register-status-eyebrow">HISTORIKKREGISTER</span><strong>SQLite-data er tilgjengelig</strong><small>Sist oppdatert {html.escape(str(latest_time))}</small></div>
+                <div class="register-status-count">{total_rows:,}<span>lagrede rader</span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.info("Ingen lagringshistorikk er registrert ennå.")
 
@@ -2035,7 +2911,7 @@ with tab_db:
     _render_section_header(
         "Historikk · selskapssøk",
         "Finn selskapet og se utviklingen.",
-        "Her kan du søke på selskapsnavn eller ISIN, filtrer historikken og eksporter akkurat det utsnittet du trenger.",
+        "Søk på selskapsnavn eller ISIN, filtrer historikken og eksporter akkurat det utsnittet du trenger.",
     )
     if df_db.empty:
         st.info("SQLite-databasen er tom. Lagre live-registeret først.")
@@ -2062,23 +2938,25 @@ with tab_top10:
         # Kombiner historikk og live-data. Overlapp fjernes, slik at en ny deploy
         # fortsatt kan vise rangeringen selv om SQLite-filen er tom eller gammel.
         data = pd.concat(top10_sources, ignore_index=True, sort=False).drop_duplicates()
-        data = _standardiser_shortpercent(data)
-        data["date"] = pd.to_datetime(data["date"], errors="coerce")
-        data = data.dropna(subset=["issuerName", "date", "shortPercent"])
+        data = _agg_issuer_date(data)
 
         period = st.selectbox("Velg tidsperiode", ["30 dager", "90 dager", "180 dager", "365 dager"])
         days = int(period.split()[0])
         latest_available = data["date"].max() if not data.empty else pd.NaT
+        daily_series = pd.DataFrame(columns=["issuerName", "date", "shortPercent"])
 
         if pd.isna(latest_available):
-            recent = pd.DataFrame(columns=data.columns)
+            start_date = pd.NaT
         else:
             latest_available = latest_available.normalize()
-            start_date = latest_available - pd.Timedelta(days=days)
-            recent = data.loc[
-                (data["date"] >= start_date)
-                & (data["date"] <= latest_available)
-            ]
+            # Inkludert både start- og sluttdato gir dette nøyaktig valgt
+            # antall kalenderdager (f.eks. 90 daglige observasjoner).
+            start_date = latest_available - pd.Timedelta(days=days - 1)
+            daily_series = bygg_daglig_shortserie(
+                data,
+                start_date=start_date,
+                end_date=latest_available,
+            )
 
             today = pd.Timestamp.today().normalize()
             age_days = max(0, int((today - latest_available).days))
@@ -2089,14 +2967,15 @@ with tab_top10:
             )
             st.caption(
                 f"Analysevindu: {start_date.strftime('%d.%m.%Y')}–"
-                f"{latest_available.strftime('%d.%m.%Y')} · {freshness}"
+                f"{latest_available.strftime('%d.%m.%Y')} · {days} kalenderdager · "
+                f"{freshness}"
             )
 
-        if recent.empty:
+        if daily_series.empty:
             st.info("Fant ingen gyldige daterte observasjoner i datagrunnlaget.")
         else:
             top10 = (
-                recent.groupby("issuerName", as_index=False)["shortPercent"]
+                daily_series.groupby("issuerName", as_index=False)["shortPercent"]
                 .mean()
                 .sort_values("shortPercent", ascending=False)
                 .head(10)
@@ -2113,29 +2992,59 @@ with tab_top10:
                 x="issuerName",
                 y="shortPercent",
                 text_auto=".2f",
-                title=f"Topp 10 – gjennomsnittlig shortandel siste {days} dager",
+                title=f"Topp 10 – tidsvektet shortandel siste {days} dager",
                 labels={"issuerName": "Selskap", "shortPercent": "Shortandel (%)"},
                 color_discrete_sequence=[CHART_PALETTE[0]],
             )
             _style_plotly_chart(fig_bar, height=500)
             fig_bar.update_xaxes(tickangle=-28)
+            fig_bar.update_yaxes(ticksuffix=" %")
             fig_bar.update_traces(
                 marker=dict(
                     color="#2563EB",
                     line=dict(color="#C7DBFF", width=1.2),
                 ),
+                texttemplate="%{y:.2f} %",
                 textposition="outside",
                 cliponaxis=False,
+                hovertemplate="%{x}<br>%{y:.2f} %<extra></extra>",
             )
             st.plotly_chart(fig_bar, width="stretch", key="top10_bar_chart")
-            st.dataframe(top10, width="stretch", hide_index=True)
+
+            top10_table = top10.copy().reset_index(drop=True)
+            top10_table.insert(0, "Rangering", range(1, len(top10_table) + 1))
+            top10_table = top10_table.rename(
+                columns={"issuerName": "Selskap", "shortPercent": "Gjennomsnittlig short %"}
+            )
+            _render_table_header(
+                "Topp 10-rangering",
+                f"Tidsvektet dagsgjennomsnitt av offentlig shortandel i valgt {days}-dagersvindu.",
+                f"{start_date.strftime('%d.%m')}–{latest_available.strftime('%d.%m.%Y')}",
+            )
+            st.dataframe(
+                top10_table,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Rangering": st.column_config.NumberColumn("#", format="%d", width="small"),
+                    "Selskap": st.column_config.TextColumn("Selskap", width="large"),
+                    "Gjennomsnittlig short %": st.column_config.ProgressColumn(
+                        "Gjennomsnittlig short %",
+                        format="%.2f %%",
+                        min_value=0.0,
+                        max_value=max(
+                            1.0,
+                            float(top10_table["Gjennomsnittlig short %"].max()) * 1.08,
+                        ),
+                        width="medium",
+                    ),
+                },
+            )
 
             names = top10["issuerName"].tolist()
-            development = (
-                recent.loc[recent["issuerName"].isin(names)]
-                .groupby(["issuerName", "date"], as_index=False)["shortPercent"]
-                .mean()
-            )
+            development = daily_series.loc[
+                daily_series["issuerName"].isin(names)
+            ].copy()
             if not development.empty:
                 fig_line = px.line(
                     development,
@@ -2148,7 +3057,11 @@ with tab_top10:
                 )
                 _style_plotly_chart(fig_line, height=600, hovermode="x unified")
                 fig_line.update_layout(legend_title_text="Utsteder")
-                fig_line.update_traces(line=dict(width=2.6))
+                fig_line.update_yaxes(ticksuffix=" %")
+                fig_line.update_traces(
+                    line=dict(width=2.6),
+                    hovertemplate="%{y:.2f} %<extra></extra>",
+                )
                 st.plotly_chart(fig_line, width="stretch", key="top10_line_chart")
 
                 heat = (
@@ -2205,9 +3118,13 @@ with tab_about:
                 <div class="about-card-number">03 · PLATTFORMEN ER BYGGET MED</div>
                 <h3>Python-basert analyse</h3>
                 <p>
-                    Utviklet av Andreas Bolton Seielstad med Python, Streamlit, Pandas,
-                    Plotly og SQLite. Prosjektet ble videreutviklet som del av et
-                    innleveringsprosjekt ved University of Oxford – Saïd Business School: Algorithmic Trading Programme.
+                Hva er brukt her?
+                    Python: Det er brukt til datainnhenting, beregninger og logikk.</br>
+                    <b>Streamlit:</b> Brukes til selve webapplikasjonen.</br>
+                    <b>Pandas:</b> Det er for strukturering, filtrering og analyse.</br>
+                    <b>Plotly:</b> Brukes til interaktive grafer og tidsserier i appen her.</br>
+                    <b>SQLite:</b> lagring av historiske observasjoner. </br></p> <p>Prosjektet ble videreutviklet som del av et
+                    innleveringsprosjekt ved University of Oxford – Saïd Business School: Algorithmic Trading Programme. Utviklet av Andreas Bolton Seielstad
                 </p>
             </article>
         </div>
