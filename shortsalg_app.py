@@ -3119,7 +3119,7 @@ with tab_about:
                 <h3>Python-basert analyse</h3>
                 <p>
                 Hva er brukt her?
-                    Python: Det er brukt til datainnhenting, beregninger og logikk.</br>
+                    Soråket er Python, og dette er brukt til datainnhenting, beregninger og logikk.</br>
                     <b>Streamlit:</b> Brukes til selve webapplikasjonen.</br>
                     <b>Pandas:</b> Det er for strukturering, filtrering og analyse.</br>
                     <b>Plotly:</b> Brukes til interaktive grafer og tidsserier i appen her.</br>
